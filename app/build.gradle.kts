@@ -1,3 +1,5 @@
+import org.gradle.api.JavaVersion
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -27,12 +29,14 @@ android {
             )
         }
     }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+    compileOptions { // Add or find this block
+        sourceCompatibility = JavaVersion.VERSION_1_8 // Set Java source compatibility
+        targetCompatibility = JavaVersion.VERSION_1_8 // Set Java target compatibility
     }
-    kotlinOptions {
-        jvmTarget = "11"
+    kotlinOptions { // This should already be here from the previous step
+        jvmTarget = "1.8"
+        languageVersion = "1.9"
+        apiVersion = "1.9"
     }
     buildFeatures {
         compose = true
