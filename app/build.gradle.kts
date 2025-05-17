@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.example.projectnoodle"
-    compileSdk = 35
+    compileSdk = 35 // Match your targetSdk
 
     defaultConfig {
         applicationId = "com.example.projectnoodle"
@@ -29,14 +29,14 @@ android {
             )
         }
     }
-    compileOptions { // Add or find this block
-        sourceCompatibility = JavaVersion.VERSION_1_8 // Set Java source compatibility
-        targetCompatibility = JavaVersion.VERSION_1_8 // Set Java target compatibility
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
-    kotlinOptions { // This should already be here from the previous step
+    kotlinOptions {
         jvmTarget = "1.8"
-        languageVersion = "1.9"
-        apiVersion = "1.9"
+        languageVersion = "1.9" // Ensure this is set for the experimental feature fix
+        apiVersion = "1.9"     // Ensure this is set
     }
     buildFeatures {
         compose = true
@@ -58,14 +58,13 @@ android {
             excludes += "kotlin/**"
             excludes += "**/*.kotlin_metadata"
             excludes += "**/*.kotlin_builtins"
-            // Add this line
-            excludes += "META-INF/io.netty.versions.properties"
+            // REMOVE THIS LINE (related to Netty/Ktor)
+            // excludes += "META-INF/io.netty.versions.properties"
         }
     }
 }
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -74,6 +73,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.appcompat)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -81,13 +81,13 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
-    // For Ktor server
-    implementation(libs.ktor.server.core.jvm) // Check for the latest version
-    implementation(libs.ktor.server.netty.jvm) // Check for the latest version
-
-    // For logging in Ktor (optional but helpful)
-    implementation(libs.ktor.server.host.common.jvm)
-    implementation(libs.logback.classic) // Or another SLF4J implementation
 
     implementation(libs.nanohttpd)
+    implementation(libs.ui)
+    implementation(libs.androidx.material)
+    implementation(libs.androidx.activity.compose.v170)
+
+    implementation(libs.nanohttpd)
+    implementation(libs.androidx.activity.compose.v1101)
+    implementation(libs.material3)
 }
