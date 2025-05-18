@@ -15,12 +15,13 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        tools:targetApi="34"  > <!-- Update targetApi to reflect permissions/features used -->
+        tools:targetApi="35" > <!-- Updated targetApi to 35 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.ProjectNoodle">
+            android:theme="@style/Theme.ProjectNoodle"
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

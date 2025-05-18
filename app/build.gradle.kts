@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.example.projectnoodle"
-    compileSdk = 35 // Match your targetSdk
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.example.projectnoodle"
@@ -30,13 +30,14 @@ android {
         }
     }
     compileOptions {
+        // Keep 1.8 for compatibility, especially with older libraries like NanoHTTPD
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
     kotlinOptions {
-        jvmTarget = "1.8"
-        languageVersion = "1.9" // Ensure this is set for the experimental feature fix
-        apiVersion = "1.9"     // Ensure this is set
+        jvmTarget = "1.8" // Match compileOptions
+        languageVersion = "1.9"
+        apiVersion = "1.9"
     }
     buildFeatures {
         compose = true
@@ -58,36 +59,47 @@ android {
             excludes += "kotlin/**"
             excludes += "**/*.kotlin_metadata"
             excludes += "**/*.kotlin_builtins"
-            // REMOVE THIS LINE (related to Netty/Ktor)
+            // REMOVE THIS LINE (related to Netty/Ktor) - Already commented out in your file, good.
             // excludes += "META-INF/io.netty.versions.properties"
         }
     }
 }
 
 dependencies {
+    // Core AndroidX
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.appcompat)
+
+    // Activity Compose
     implementation(libs.androidx.activity.compose)
+
+    // Compose - Use the BOM to manage versions
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.appcompat)
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
+
+    // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
 
+    // NanoHTTPD
     implementation(libs.nanohttpd)
-    implementation(libs.ui)
-    implementation(libs.androidx.material)
-    implementation(libs.androidx.activity.compose.v170)
 
-    implementation(libs.nanohttpd)
-    implementation(libs.androidx.activity.compose.v1101)
-    implementation(libs.material3)
+    // Storage Access Framework / DocumentFile
+    implementation(libs.androidx.documentfile) // Add documentfile dependency
+
+    // REMOVED: Redundant/conflicting dependencies based on TOML cleanup
+    // implementation(libs.ui)
+    // implementation(libs.androidx.material)
+    // implementation(libs.androidx.activity.compose.v170)
+    // implementation(libs.androidx.activity.compose.v1101)
+    // implementation(libs.material3)
 }
