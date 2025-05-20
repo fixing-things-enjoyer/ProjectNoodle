@@ -1,40 +1,41 @@
+// File: app/src/main/java/com/example/projectnoodle/WebServer.kt
 package com.example.projectnoodle
 
 import android.content.Context
 import android.net.Uri
-import android.provider.DocumentsContract
+// import android.provider.DocumentsContract // Not used directly
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import fi.iki.elonen.NanoHTTPD
-import fi.iki.elonen.NanoHTTPD.Response.Status // Import Status constants
-import fi.iki.elonen.NanoHTTPD.Method // Import Method enum
+import fi.iki.elonen.NanoHTTPD.Response.Status
+import fi.iki.elonen.NanoHTTPD.Method
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
 import java.net.URLConnection
-import java.net.URLDecoder // Import URLDecoder
-import java.net.URLEncoder // Import URLEncoder
+import java.net.URLDecoder
+import java.net.URLEncoder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.HashMap
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
+import java.nio.charset.StandardCharsets
 
-private const val TAG = "ProjectNoodleServer"
+private const val TAG = "ProjectNoodleWebServer" // Renamed TAG for clarity
 
-private val INLINE_MIME_PREFIXES = setOf(
-    "image/",
-    "video/",
-    "audio/",
-    "text/plain",
-    "application/pdf"
-)
+private const val MIME_JSON = "application/json" // Define JSON MIME type
+private const val MIME_OCTET_STREAM = "application/octet-stream" // Default binary mime type
+// --- End FIX ---
 
 class WebServer(
     port: Int,
-    private val applicationContext: Context,
-    private val sharedDirectoryUri: Uri
+    private val applicationContext: Context, // Keep context reference
+    private val sharedDirectoryUri: Uri, // Keep URI reference
+    private val serverIpAddress: String? // Keep IP reference
 ) : NanoHTTPD(port) {
 
     private val rootDocumentFile = DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
@@ -44,42 +45,43 @@ class WebServer(
 
         if (rootDocumentFile == null || !rootDocumentFile.exists() || !rootDocumentFile.isDirectory) {
             Log.e(TAG, "WebServer: Invalid or inaccessible root DocumentFile for URI: ${sharedDirectoryUri.toString()}")
+            // The Service checks this before creating the WebServer instance now.
         } else {
             Log.d(TAG, "WebServer: Root DocumentFile resolved: ${rootDocumentFile.name}")
         }
     }
 
-    private fun findDocumentFile(uriPath: String): DocumentFile? {
-        Log.d(TAG, "findDocumentFile: Searching for URI path: $uriPath")
+    private fun findDocumentFile(relativePath: String): DocumentFile? {
+        Log.d(TAG, "findDocumentFile: Searching for relative path: $relativePath")
 
         if (rootDocumentFile == null) {
             Log.e(TAG, "findDocumentFile: Root DocumentFile is null (invalid shared URI?).")
             return null
         }
 
-        if (uriPath.trim('/') == "") {
-            Log.d(TAG, "findDocumentFile: Request is for the root directory.")
+        val normalizedPath = "/" + relativePath.trim('/').replace(Regex("/+"), "/")
+
+        if (normalizedPath == "/") {
+            Log.d(TAG, "findDocumentFile: Request is for the root directory ('/').")
             return rootDocumentFile
         }
 
-        val segments = uriPath.trim('/').split('/').filter { it.isNotEmpty() }
-        Log.d(TAG, "findDocumentFile: Path segments: $segments")
+        val segments = normalizedPath.removePrefix("/").split('/').filter { it.isNotEmpty() }
 
         var currentDocument: DocumentFile? = rootDocumentFile
 
         for (segment in segments) {
-            val decodedSegment = try { URLDecoder.decode(segment, "UTF-8") } catch (e: Exception) { segment }
+             val decodedSegment = try { URLDecoder.decode(segment, StandardCharsets.UTF_8.name()) } catch (e: Exception) { segment }
 
             val foundChild = currentDocument?.findFile(decodedSegment)
             if (foundChild == null) {
-                Log.w(TAG, "findDocumentFile: Could not find segment '$decodedSegment' (original: '$segment') in ${currentDocument?.name ?: "current directory"} (URI: ${currentDocument?.uri}). Path not found.")
+                Log.w(TAG, "findDocumentFile: Could not find segment '$decodedSegment' (original segment: '$segment') in ${currentDocument?.name ?: "current directory"} (URI: ${currentDocument?.uri}). Path not found.")
                 return null
             }
             currentDocument = foundChild
-            Log.d(TAG, "findDocumentFile: Found segment '$decodedSegment'. Current Document URI: ${currentDocument.uri}")
         }
 
-        Log.d(TAG, "findDocumentFile: Found DocumentFile for path: ${currentDocument?.uri}")
+        Log.d(TAG, "findDocumentFile: Successfully resolved path. Final Document URI: ${currentDocument?.uri}")
         return currentDocument
     }
 
@@ -87,292 +89,495 @@ class WebServer(
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
         val method = session.method
-        Log.d(TAG, "WebServer: Received request:")
-        Log.d(TAG, "WebServer:   Method: $method")
-        Log.d(TAG, "WebServer:   URI: $uri")
+        Log.d(TAG, "WebServer: Received request: $method $uri")
 
-        session.headers?.forEach { (key, value) -> Log.d(TAG, "WebServer:     Header $key: $value") }
+        if (Method.OPTIONS == method) {
+            val preflightResponse = newFixedLengthResponse(Status.OK, "text/plain", "")
+
+            preflightResponse.addHeader("Access-Control-Allow-Origin", "*")
+            preflightResponse.addHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            preflightResponse.addHeader("Access-Control-Max-Age", "86400")
+
+            val requestedHeaders = session.headers["access-control-request-headers"]
+            if (requestedHeaders != null) {
+                 preflightResponse.addHeader("Access-Control-Allow-Headers", requestedHeaders)
+                 Log.d(TAG, "WebServer: Added Access-Control-Allow-Headers: $requestedHeaders")
+            }
+
+            return preflightResponse
+        }
 
         val files = HashMap<String, String>()
         if (Method.POST == method || Method.PUT == method) {
             try {
                 session.parseBody(files)
-                Log.d(TAG, "WebServer: Parsed POST body. Parameters: ${session.parameters}, Temp Files: $files")
             } catch (ioe: IOException) {
-                Log.e(TAG, "WebServer: POST body parsing failed", ioe)
-                return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "500 Internal Error: Can't read body.")
+                Log.e(TAG, "WebServer: Body parsing failed", ioe)
+                val errorResponse = newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "500 Internal Error: Can't read body."))
+                 errorResponse.addHeader("Access-Control-Allow-Origin", "*")
+                 return errorResponse
             } catch (hre: ResponseException) {
-                Log.e(TAG, "WebServer: POST body parsing failed (ResponseException)", hre)
-                return newFixedLengthResponse(hre.status, "text/plain", "500 Internal Error: ${hre.message}")
+                Log.e(TAG, "WebServer: Body parsing failed (ResponseException)", hre)
+                val errorResponse = newJsonResponse(hre.status, mapOf("status" to "error", "message" to "Request parsing failed: ${hre.message}"))
+                 errorResponse.addHeader("Access-Control-Allow-Origin", "*")
+                 return errorResponse
             }
         }
 
-        val sanitizedUri = uri.replace("/+", "/")
+        val requestUrlPath = uri.split('?')[0]
+        val requestUrlPathClean = "/" + requestUrlPath.trim('/').replace(Regex("/+"), "/")
 
 
-        val targetPathParam = session.parameters["path"]?.get(0)
-        val targetPath = if (targetPathParam != null) {
-             try { URLDecoder.decode(targetPathParam, "UTF-8") } catch (e: Exception) { targetPathParam }
-        } else null
+        val response: Response = when {
+            requestUrlPathClean == "/api/list" && method == Method.GET -> {
+                 val targetPath = session.parameters["path"]?.get(0) ?: "/"
+                 Log.d(TAG, "WebServer: Handling GET /api/list for path param: $targetPath")
 
-        Log.d(TAG, "WebServer:   Target Path Parameter: $targetPath")
-
-
-        when {
-            method == Method.POST && session.parameters["_method"]?.get(0)?.uppercase(Locale.ROOT) == "DELETE" && targetPath != null -> {
-                 Log.d(TAG, "WebServer: Handling simulated DELETE request for path: $targetPath")
-                 val response = handleDelete(targetPath)
-                 val parentUriPath = getParentUriPath(targetPath)
-                 val redirectUrl = if (parentUriPath == "/") "/" else parentUriPath.encodeAsUriComponent()
-                 val redirectResponse = newFixedLengthResponse(Status.REDIRECT, "text/plain", "Redirecting...") // **FIXED: Use Status.REDIRECT**
-                 redirectResponse.addHeader("Location", redirectUrl)
-                 return redirectResponse
-
+                 val directoryDocument = findDocumentFile(targetPath)
+                 if (directoryDocument != null && directoryDocument.isDirectory) {
+                    serveJsonDirectoryListing(targetPath, directoryDocument)
+                 } else if (directoryDocument != null && directoryDocument.isFile) {
+                       Log.w(TAG, "WebServer: /api/list request for a file: ${directoryDocument.uri}")
+                       newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Path is a file, not a directory."))
+                 }
+                 else {
+                    Log.w(TAG, "WebServer: Directory not found for /api/list: $targetPath")
+                    newJsonResponse(Status.NOT_FOUND, mapOf("status" to "error", "message" to "Directory not found."))
+                 }
             }
-            method == Method.POST && sanitizedUri == "/rename" && targetPath != null -> {
+
+            requestUrlPathClean == "/api/delete" && method == Method.POST -> {
+                val targetPath = session.parameters["path"]?.get(0)
+                Log.d(TAG, "WebServer: Handling POST /api/delete for path: $targetPath")
+                handleDeleteJson(targetPath)
+            }
+
+            requestUrlPathClean == "/api/rename" && method == Method.POST -> {
+                val targetPath = session.parameters["path"]?.get(0)
                 val newName = session.parameters["newName"]?.get(0)
-                Log.d(TAG, "WebServer: Handling POST request to /rename for path: $targetPath with new name: $newName")
-                val response = handleRename(targetPath, newName)
-                 val parentUriPath = getParentUriPath(targetPath)
-                 val redirectUrl = if (parentUriPath == "/") "/" else parentUriPath.encodeAsUriComponent()
-                 val redirectResponse = newFixedLengthResponse(Status.REDIRECT, "text/plain", "Redirecting...") // **FIXED: Use Status.REDIRECT**
-                 redirectResponse.addHeader("Location", redirectUrl)
-                 return redirectResponse
+                Log.d(TAG, "WebServer: Handling POST /api/rename for path: $targetPath with new name: $newName")
+                handleRenameJson(targetPath, newName)
             }
-            method == Method.POST && sanitizedUri == "/mkdir" -> {
-                 val currentDirPath = targetPath ?: "/"
+
+            requestUrlPathClean == "/api/mkdir" && method == Method.POST -> {
+                 val currentDirPath = session.parameters["path"]?.get(0) ?: "/"
                  val newDirName = session.parameters["newDirName"]?.get(0)
-                 Log.d(TAG, "WebServer: Handling POST request to /mkdir in directory: $currentDirPath with new name: $newDirName")
-                 val response = handleMkdir(currentDirPath, newDirName)
-                 val redirectUrl = if (currentDirPath == "/") "/" else currentDirPath.encodeAsUriComponent()
-                 val redirectResponse = newFixedLengthResponse(Status.REDIRECT, "text/plain", "Redirecting...") // **FIXED: Use Status.REDIRECT**
-                 redirectResponse.addHeader("Location", redirectUrl)
-                 return redirectResponse
-            }
-             method == Method.POST && sanitizedUri == "/upload" -> {
-                 val currentDirPath = targetPath ?: "/"
-                 Log.d(TAG, "WebServer: Handling POST request to /upload in directory: $currentDirPath")
-                 val response = handleUpload(currentDirPath, session, files)
-                 val redirectUrl = if (currentDirPath == "/") "/" else currentDirPath.encodeAsUriComponent()
-                 val redirectResponse = newFixedLengthResponse(Status.REDIRECT, "text/plain", "Redirecting...") // **FIXED: Use Status.REDIRECT**
-                 redirectResponse.addHeader("Location", redirectUrl)
-                 return redirectResponse
+                 Log.d(TAG, "WebServer: Handling POST /api/mkdir in directory: $currentDirPath with new name: $newDirName")
+                handleMkdirJson(currentDirPath, newDirName)
             }
 
+            requestUrlPathClean == "/api/upload" && method == Method.POST -> {
+                val currentDirPath = session.parameters["path"]?.get(0) ?: "/"
+                 Log.d(TAG, "WebServer: Handling POST /api/upload in directory: $currentDirPath")
+                handleUploadJson(currentDirPath, session, files)
+            }
 
-            method == Method.GET || method == Method.HEAD -> {
-                val requestedDocument = findDocumentFile(sanitizedUri)
+            requestUrlPathClean.startsWith("/files/") && method == Method.GET -> {
+                 val filePath = "/" + requestUrlPathClean.removePrefix("/files").trimStart('/')
+                 Log.d(TAG, "WebServer: Handling GET /files/ for path: $filePath")
+                 val fileDocument = findDocumentFile(filePath)
+                 if (fileDocument != null && fileDocument.isFile) {
+                     serveFile(session, fileDocument)
+                 } else if (fileDocument != null && fileDocument.isDirectory) {
+                      Log.w(TAG, "WebServer: /files/ request for a directory: ${fileDocument.uri}")
+                       newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: Path is a directory, not a file.")
+                 }
+                 else {
+                     Log.w(TAG, "WebServer: File not found for /files/: $filePath")
+                     newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Error 404: File not found.")
+                 }
+            }
 
-                if (requestedDocument == null) {
-                    Log.w(TAG, "WebServer: Document not found for serving: $sanitizedUri")
-                    return newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Error 404: File or directory not found.")
+            (requestUrlPathClean == "/" ||
+             requestUrlPathClean.startsWith("/assets/") ||
+             requestUrlPathClean == "/vite.svg" ||
+             requestUrlPathClean == "/index.css")
+             && method == Method.GET -> {
+
+                val assetPath = when {
+                     requestUrlPathClean == "/" -> "index.html"
+                     requestUrlPathClean.startsWith("/assets/") -> requestUrlPathClean.removePrefix("/")
+                     else -> requestUrlPathClean.removePrefix("/")
                 }
+                Log.d(TAG, "WebServer: Handling GET $requestUrlPathClean (serving asset: $assetPath) from Android assets/")
+                try {
+                    if (assetPath == "index.html") {
+                        val indexHtmlStream: InputStream = applicationContext.assets.open(assetPath)
+                        val reader = indexHtmlStream.bufferedReader()
+                        val indexHtmlContent = reader.use { it.readText() }
 
-                if (requestedDocument.isDirectory) {
-                    Log.d(TAG, "WebServer: Serving directory listing for: ${requestedDocument.uri}")
-                    return serveDirectoryListing(session, requestedDocument)
-                } else if (requestedDocument.isFile) {
-                    Log.d(TAG, "WebServer: Serving file: ${requestedDocument.uri}")
-                    return serveFile(session, requestedDocument)
-                } else {
-                    Log.w(TAG, "WebServer: Requested document is neither file nor directory for serving: ${requestedDocument.uri}")
-                    return newFixedLengthResponse(Status.FORBIDDEN, "text/plain", "Access Denied.")
+                        val serverBaseUrl = if (serverIpAddress != null) "http://$serverIpAddress:$listeningPort" else null
+                        val headEndTag = "</head>"
+                        val scriptToInject = serverBaseUrl?.let { url ->
+                            "<script>\n" +
+                            "  window.__API_BASE_URL__ = \"$url\";\n" +
+                            "  console.log('Injected API Base URL:', window.__API_BASE_URL__);\n" +
+                            "</script>\n"
+                        } ?: ""
+
+                        val modifiedHtmlContent = if (indexHtmlContent.contains(headEndTag)) {
+                            indexHtmlContent.replace(headEndTag, scriptToInject + headEndTag)
+                        } else {
+                            Log.w(TAG, "WebServer: </head> not found in index.html, injecting script at start of body.")
+                            indexHtmlContent.replace("<body>", "<body>\n$scriptToInject")
+                        }
+                         val mimeType = "text/html"
+                         newFixedLengthResponse(Status.OK, mimeType, modifiedHtmlContent)
+
+                    } else {
+                        val assetStream: InputStream = applicationContext.assets.open(assetPath)
+                        val mimeType = guessMimeTypeFromExtension(assetPath) ?: MIME_OCTET_STREAM
+                        newChunkedResponse(Status.OK, mimeType, assetStream)
+                    }
+
+                } catch (e: FileNotFoundException) {
+                    Log.w(TAG, "WebServer: Asset not found: $assetPath", e)
+                    newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "404 Asset Not Found")
+                } catch (e: Exception) {
+                    Log.e(TAG, "WebServer: Error serving asset: $assetPath", e)
+                    newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "500 Internal Server Error serving asset.")
                 }
             }
+
             else -> {
-                Log.w(TAG, "WebServer: Method not allowed: $method for URI: $uri")
-                return newFixedLengthResponse(Status.METHOD_NOT_ALLOWED, "text/plain", "Method Not Allowed")
+                Log.w(TAG, "WebServer: Unhandled request - Method: $method, URI: $uri, CleanPath: $requestUrlPathClean")
+                newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "404 Not Found: API endpoint, file, or resource not found for path $requestUrlPathClean.")
             }
         }
+
+        response.addHeader("Access-Control-Allow-Origin", "*")
+
+        return response
     }
 
-    private fun getParentUriPath(currentPath: String): String {
-        val path = currentPath.removeSuffix("/")
-        val lastSlashIndex = path.lastIndexOf('/')
-        return if (lastSlashIndex <= 0) "/" else path.substring(0, lastSlashIndex)
+     private fun newJsonResponse(status: Status, jsonMap: Map<String, Any?>): Response {
+        val jsonObject = JSONObject(jsonMap)
+        val jsonString = jsonObject.toString()
+        val response = newFixedLengthResponse(status, MIME_JSON, jsonString)
+        response.addHeader("Access-Control-Allow-Origin", "*")
+        return response
+    }
+
+    private fun newJsonResponse(status: Status, jsonArray: JSONArray): Response {
+        val jsonString = jsonArray.toString()
+        val response = newFixedLengthResponse(status, MIME_JSON, jsonString)
+        response.addHeader("Access-Control-Allow-Origin", "*")
+        return response
+    }
+
+     private fun newJsonResponse(status: Status, jsonObject: JSONObject): Response {
+        val jsonString = jsonObject.toString()
+        val response = newFixedLengthResponse(status, MIME_JSON, jsonString)
+        response.addHeader("Access-Control-Allow-Origin", "*")
+        return response
     }
 
 
-    private fun handleDelete(targetPath: String?): Response {
-        if (targetPath == null || targetPath.trim('/') == "") {
-            Log.w(TAG, "handleDelete: Missing or invalid 'path' parameter.")
-            return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: Missing or invalid 'path' parameter.")
+    private fun serveJsonDirectoryListing(requestedPath: String, directoryDocument: DocumentFile): Response {
+        val children = directoryDocument.listFiles() ?: emptyArray()
+        val sortedEntries = children.sortedWith(compareBy({ !it.isDirectory }, { it.name?.lowercase() ?: "" }))
+
+        val jsonArray = JSONArray()
+
+        val serverBaseUrl = if (serverIpAddress != null) "http://$serverIpAddress:$listeningPort" else null
+
+        if (rootDocumentFile != null && directoryDocument.uri != rootDocumentFile.uri) {
+            val parentPath = getParentPath(requestedPath)
+            val parentEntry = JSONObject().apply {
+                put("name", "..")
+                put("type", "directory")
+                put("path", parentPath)
+                 put("apiUrl", serverBaseUrl?.let { baseUrl ->
+                     "$baseUrl/api/list?path=${parentPath.encodeAsUriComponent()}"
+                 }) ?: JSONObject.NULL
+                put("size", JSONObject.NULL)
+                put("lastModified", JSONObject.NULL)
+            }
+            jsonArray.put(parentEntry)
         }
 
-        val documentToDelete = findDocumentFile(targetPath)
+        for (document in sortedEntries) {
+             if (rootDocumentFile != null && document.uri == rootDocumentFile.uri) {
+                 continue
+             }
+
+            val name = document.name ?: "Unnamed"
+            val itemLogicalPath = if (requestedPath == "/") "/${name}" else "${requestedPath}/${name}"
+            val cleanItemLogicalPath = itemLogicalPath.replace(Regex("/+"), "/")
+
+            val itemJson = JSONObject().apply {
+                put("name", name)
+                put("type", if (document.isDirectory) "directory" else "file")
+                put("path", cleanItemLogicalPath)
+                put("lastModified", document.lastModified())
+                if (document.isFile) {
+                    put("size", document.length())
+                     put("fileUrl", serverBaseUrl?.let { baseUrl ->
+                         "$baseUrl/files${cleanItemLogicalPath.encodeAsUriComponent()}"
+                     }) ?: JSONObject.NULL
+                } else {
+                    put("size", JSONObject.NULL)
+                    put("apiUrl", serverBaseUrl?.let { baseUrl ->
+                        "$baseUrl/api/list?path=${cleanItemLogicalPath.encodeAsUriComponent()}"
+                    }) ?: JSONObject.NULL
+                }
+                 if (serverBaseUrl != null && rootDocumentFile != null && document.uri != rootDocumentFile.uri) {
+                     put("deleteApiUrl", "$serverBaseUrl/api/delete")
+                     put("renameApiUrl", "$serverBaseUrl/api/rename")
+                 } else {
+                     put("deleteApiUrl", JSONObject.NULL)
+                     put("renameApiUrl", JSONObject.NULL)
+                 }
+            }
+            jsonArray.put(itemJson)
+        }
+
+        val responseJson = JSONObject().apply {
+             put("currentPath", requestedPath)
+             put("items", jsonArray)
+             put("serverName", "Project Noodle")
+        }
+
+        return newJsonResponse(Status.OK, responseJson)
+    }
+
+    private fun getParentPath(currentPath: String): String {
+        val path = "/" + currentPath.trim('/')
+        if (path == "/") return "/"
+
+        val lastSlashIndex = path.lastIndexOf('/')
+        val parent = if (lastSlashIndex <= 0) "/" else path.substring(0, lastSlashIndex)
+        return "/" + parent.trim('/').replace(Regex("/+"), "/")
+    }
+
+
+    private fun handleDeleteJson(targetPath: String?): Response {
+        if (targetPath == null || targetPath.trim('/').isEmpty()) {
+            Log.w(TAG, "handleDeleteJson: Missing or invalid 'path' parameter.")
+            return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Missing or invalid 'path' parameter."))
+        }
+         val normalizedTargetPath = "/" + targetPath.trimStart('/')
+
+        val documentToDelete = findDocumentFile(normalizedTargetPath)
 
         if (documentToDelete == null) {
-            Log.w(TAG, "handleDelete: Document not found for path: $targetPath")
-            return newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Error 404: File or directory not found.")
+            Log.w(TAG, "handleDeleteJson: Document not found for path: $normalizedTargetPath")
+            return newJsonResponse(Status.NOT_FOUND, mapOf("status" to "error", "message" to "Error 404: File or directory not found."))
         }
 
-         if (documentToDelete.uri == sharedDirectoryUri) {
-            Log.w(TAG, "handleDelete: Attempted to delete root directory via path: $targetPath")
-            return newFixedLengthResponse(Status.FORBIDDEN, "text/plain", "Error 403: Cannot delete the root directory.")
+         if (rootDocumentFile != null && documentToDelete.uri == rootDocumentFile.uri) {
+            Log.w(TAG, "handleDeleteJson: Attempted to delete root directory via path: $normalizedTargetPath")
+            return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Error 403: Cannot delete the root directory."))
          }
 
 
         try {
             val success = documentToDelete.delete()
-            if (success) {
-                Log.i(TAG, "handleDelete: Successfully deleted: $targetPath (Document: ${documentToDelete.name})")
-                return newFixedLengthResponse(Status.OK, "text/plain", "Successfully deleted: ${documentToDelete.name}")
+            return if (success) {
+                Log.i(TAG, "handleDeleteJson: Successfully deleted: $normalizedTargetPath (Document: ${documentToDelete.name})")
+                newJsonResponse(Status.OK, mapOf("status" to "success", "message" to "Successfully deleted: ${documentToDelete.name}", "path" to normalizedTargetPath))
             } else {
-                Log.e(TAG, "handleDelete: Failed to delete: $targetPath (Document: ${documentToDelete.name})")
-                return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Failed to delete.")
+                Log.e(TAG, "handleDeleteJson: Failed to delete: $normalizedTargetPath (Document: ${documentToDelete.name})")
+                newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Failed to delete. Check app permissions or if file is in use."))
             }
         } catch (e: SecurityException) {
-             Log.e(TAG, "handleDelete: Security exception deleting ${documentToDelete.uri}", e)
-             return newFixedLengthResponse(Status.FORBIDDEN, "text/plain", "Error 403: Permission denied.")
+             Log.e(TAG, "handleDeleteJson: Security exception deleting ${documentToDelete.uri}", e)
+             return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Error 403: Permission denied."))
         } catch (e: Exception) {
-            Log.e(TAG, "handleDelete: Unexpected error deleting $targetPath", e)
-            return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Unexpected server error during deletion: ${e.message}")
+            Log.e(TAG, "handleDeleteJson: Unexpected error deleting $normalizedTargetPath", e)
+            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Unexpected server error during deletion: ${e.message}"))
         }
     }
 
-     private fun handleRename(targetPath: String?, newName: String?): Response {
+     private fun handleRenameJson(targetPath: String?, newName: String?): Response {
         if (targetPath == null || newName == null || newName.trim().isEmpty()) {
-            Log.w(TAG, "handleRename: Missing 'path' or 'newName' parameter.")
-            return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: Missing 'path' or 'newName' parameter.")
+            Log.w(TAG, "handleRenameJson: Missing 'path' or 'newName' parameter.")
+            return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Missing 'path' or 'newName' parameter."))
         }
 
-         val decodedNewName = try { URLDecoder.decode(newName, "UTF-8") } catch (e: Exception) { newName }
-         Log.d(TAG, "handleRename: Decoded new name: '$decodedNewName'")
+         val decodedNewName = try { URLDecoder.decode(newName, StandardCharsets.UTF_8.name()) } catch (e: Exception) { newName }
 
-        val documentToRename = findDocumentFile(targetPath)
+          val normalizedTargetPath = "/" + targetPath.trimStart('/')
+
+        val documentToRename = findDocumentFile(normalizedTargetPath)
 
         if (documentToRename == null) {
-            Log.w(TAG, "handleRename: Document not found for path: $targetPath")
-            return newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Error 404: File or directory not found.")
+            Log.w(TAG, "handleRenameJson: Document not found for path: $normalizedTargetPath")
+            return newJsonResponse(Status.NOT_FOUND, mapOf("status" to "error", "message" to "Error 404: File or directory not found."))
         }
-        if (documentToRename.uri == sharedDirectoryUri) {
-            Log.w(TAG, "handleRename: Attempted to rename root directory via path: $targetPath")
-            return newFixedLengthResponse(Status.FORBIDDEN, "text/plain", "Error 403: Cannot rename the root directory.")
+         if (rootDocumentFile != null && documentToRename.uri == rootDocumentFile.uri) {
+            Log.w(TAG, "handleRenameJson: Attempted to rename root directory via path: $normalizedTargetPath")
+            return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Error 403: Cannot rename the root directory."))
          }
 
          if (decodedNewName.trim().isEmpty()) {
-             Log.w(TAG, "handleRename: New name is empty after decoding/trimming.")
-             return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: New name cannot be empty.")
+             Log.w(TAG, "handleRenameJson: New name is empty after decoding/trimming.")
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "New name cannot be empty."))
          }
          if (decodedNewName.contains("/") || decodedNewName.contains("\\")) {
-             Log.w(TAG, "handleRename: New name contains invalid characters (slashes).")
-             return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: New name cannot contain slashes.")
+             Log.w(TAG, "handleRenameJson: New name contains invalid characters (slashes).")
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "New name cannot contain slashes."))
          }
 
 
         try {
             val success = documentToRename.renameTo(decodedNewName)
-            if (success) {
-                Log.i(TAG, "handleRename: Successfully renamed ${documentToRename.name} to $decodedNewName")
-                return newFixedLengthResponse(Status.OK, "text/plain", "Successfully renamed to: ${decodedNewName}")
+            return if (success) {
+                Log.i(TAG, "handleRenameJson: Successfully renamed ${documentToRename.name} to $decodedNewName")
+                val parentLogicalPath = getParentPath(normalizedTargetPath)
+                val newLogicalPath = if (parentLogicalPath == "/") "/$decodedNewName" else "${parentLogicalPath}/${decodedNewName}"
+                 val cleanNewLogicalPath = newLogicalPath.replace(Regex("/+"), "/")
+
+                newJsonResponse(Status.OK, mapOf("status" to "success", "message" to "Successfully renamed to: ${decodedNewName}", "oldPath" to normalizedTargetPath, "newPath" to cleanNewLogicalPath))
             } else {
-                Log.e(TAG, "handleRename: Failed to rename ${documentToRename.name} to $decodedNewName")
-                return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Failed to rename.")
+                Log.e(TAG, "handleRenameJson: Failed to rename ${documentToRename.name} to $decodedNewName")
+                newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Failed to rename. A file/directory with that name might already exist or permissions are insufficient."))
             }
         } catch (e: SecurityException) {
-             Log.e(TAG, "handleRename: Security exception renaming ${documentToRename.uri} to $decodedNewName", e)
-             return newFixedLengthResponse(Status.FORBIDDEN, "text/plain", "Error 403: Permission denied.")
+             Log.e(TAG, "handleRenameJson: Security exception renaming ${documentToRename.uri} to $decodedNewName", e)
+             return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Error 403: Permission denied."))
         } catch (e: Exception) {
-            Log.e(TAG, "handleRename: Unexpected error renaming $targetPath to $decodedNewName", e)
-            return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Unexpected server error during renaming: ${e.message}")
+            Log.e(TAG, "handleRenameJson: Unexpected error renaming $normalizedTargetPath to $decodedNewName", e)
+            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Unexpected server error during renaming: ${e.message}"))
         }
     }
 
-    private fun handleMkdir(currentDirPath: String, newDirName: String?): Response {
+     private fun handleMkdirJson(currentDirPath: String, newDirName: String?): Response {
         if (newDirName == null || newDirName.trim().isEmpty()) {
-            Log.w(TAG, "handleMkdir: Missing 'newDirName' parameter.")
-            return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: Missing 'newDirName' parameter.")
+            Log.w(TAG, "handleMkdirJson: Missing 'newDirName' parameter.")
+            return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Missing 'newDirName' parameter."))
         }
 
-        val decodedNewDirName = try { URLDecoder.decode(newDirName, "UTF-8") } catch (e: Exception) { newDirName }
-        Log.d(TAG, "handleMkdir: Decoded new directory name: '$decodedNewDirName'")
+        val decodedNewDirName = try { URLDecoder.decode(newDirName, StandardCharsets.UTF_8.name()) } catch (e: Exception) { newDirName }
+        Log.d(TAG, "handleMkdirJson: Decoded new directory name: '$decodedNewDirName'")
 
-        val parentDirectory = findDocumentFile(currentDirPath)
+         val normalizedCurrentDirPath = "/" + currentDirPath.trimStart('/')
+
+
+        val parentDirectory = findDocumentFile(normalizedCurrentDirPath)
 
         if (parentDirectory == null || !parentDirectory.isDirectory) {
-            Log.w(TAG, "handleMkdir: Parent directory not found or not a directory for path: $currentDirPath")
-            return newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Error 404: Destination directory not found.")
+            Log.w(TAG, "handleMkdirJson: Parent directory not found or not a directory for path: $normalizedCurrentDirPath")
+            return newJsonResponse(Status.NOT_FOUND, mapOf("status" to "error", "message" to "Error 404: Destination directory not found or is not a directory."))
         }
 
          if (decodedNewDirName.trim().isEmpty()) {
-             Log.w(TAG, "handleMkdir: New directory name is empty after decoding/trimming.")
-             return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: New directory name cannot be empty.")
+             Log.w(TAG, "handleMkdirJson: New directory name is empty after decoding/trimming.")
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "New directory name cannot be empty."))
          }
          if (decodedNewDirName.contains("/") || decodedNewDirName.contains("\\")) {
-             Log.w(TAG, "handleMkdir: New directory name contains invalid characters (slashes).")
-             return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: New directory name cannot contain slashes.")
+             Log.w(TAG, "handleMkdirJson: New directory name contains invalid characters (slashes).")
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "New directory name cannot contain slashes."))
          }
 
 
         try {
             val newDir = parentDirectory.createDirectory(decodedNewDirName)
-            if (newDir != null) {
-                Log.i(TAG, "handleMkdir: Successfully created directory: ${newDir.name} in ${parentDirectory.name}")
-                return newFixedLengthResponse(Status.CREATED, "text/plain", "Successfully created directory: ${newDir.name}")
+            return if (newDir != null) {
+                Log.i(TAG, "handleMkdirJson: Successfully created directory: ${newDir.name} in ${parentDirectory.name}")
+                 val newLogicalDirPath = if (normalizedCurrentDirPath == "/") "/${newDir.name}" else "${normalizedCurrentDirPath}/${newDir.name}"
+                 val cleanNewLogicalDirPath = newLogicalDirPath.replace(Regex("/+"), "/")
+
+                newJsonResponse(Status.CREATED, mapOf("status" to "success", "message" to "Successfully created directory: ${newDir.name}", "path" to cleanNewLogicalDirPath))
             } else {
-                Log.e(TAG, "handleMkdir: Failed to create directory '$decodedNewDirName' in $currentDirPath")
-                return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Failed to create directory.")
+                Log.e(TAG, "handleMkdirJson: Failed to create directory '$decodedNewDirName' in ${parentDirectory.name}. createFile returned null.")
+                newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Failed to create directory. A directory with that name might already exist or permissions are insufficient."))
             }
         } catch (e: SecurityException) {
-             Log.e(TAG, "handleMkdir: Security exception creating directory '$decodedNewDirName' in ${parentDirectory.uri}", e)
-             return newFixedLengthResponse(Status.FORBIDDEN, "text/plain", "Error 403: Permission denied.")
+             Log.e(TAG, "handleMkdirJson: Security exception creating directory '$decodedNewDirName' in ${parentDirectory.uri}", e)
+             return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Error 403: Permission denied."))
         } catch (e: Exception) {
-            Log.e(TAG, "handleMkdir: Unexpected error creating directory '$decodedNewDirName' in $currentDirPath", e)
-            return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Unexpected server error during directory creation: ${e.message}")
+            Log.e(TAG, "handleMkdirJson: Unexpected error creating directory '$decodedNewDirName' in $normalizedCurrentDirPath", e)
+            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Unexpected server error during directory creation: ${e.message}"))
         }
     }
 
-    private fun handleUpload(currentDirPath: String, session: IHTTPSession, files: HashMap<String, String>): Response {
-        val parentDirectory = findDocumentFile(currentDirPath)
+     private fun handleUploadJson(currentDirPath: String, session: IHTTPSession, files: HashMap<String, String>): Response {
+        val normalizedCurrentDirPath = "/" + currentDirPath.trimStart('/')
+
+        val parentDirectory = findDocumentFile(normalizedCurrentDirPath)
 
         if (parentDirectory == null || !parentDirectory.isDirectory) {
-            Log.w(TAG, "handleUpload: Parent directory not found or not a directory for path: $currentDirPath")
+            Log.w(TAG, "handleUploadJson: Parent directory not found or not a directory for path: $normalizedCurrentDirPath")
             files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-            return newFixedLengthResponse(Status.NOT_FOUND, "text/plain", "Error 404: Destination directory not found.")
+            return newJsonResponse(Status.NOT_FOUND, mapOf("status" to "error", "message" to "Error 404: Destination directory not found or is not a directory."))
         }
 
         val uploadedFileKey = session.parameters.keys.find { key -> files.containsKey(key) }
 
         if (uploadedFileKey == null) {
-            Log.w(TAG, "handleUpload: No file parameter found in request.")
+            Log.w(TAG, "handleUploadJson: No file parameter key found in session parameters or files map.")
              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-            return newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: No file uploaded.")
+            return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Error 400: No file upload part found in request."))
         }
 
         val tempFilePath = files[uploadedFileKey]
-        val originalFileName = session.parameters[uploadedFileKey]?.getOrNull(1)
-                                 ?: File(tempFilePath ?: "").name
 
-        if (tempFilePath == null || originalFileName.isNullOrEmpty()) {
-             Log.w(TAG, "handleUpload: Missing temp file path or original filename.")
+        if (tempFilePath.isNullOrEmpty()) {
+             Log.w(TAG, "handleUploadJson: Temporary file path is null or empty from 'files' map for key: $uploadedFileKey")
              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-             return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Could not process uploaded file.")
+             return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Internal error processing temp file path from 'files' map."))
         }
 
-        Log.d(TAG, "handleUpload: Received file '$originalFileName' at temporary path: $tempFilePath")
+        val originalFileNameList = session.parameters[uploadedFileKey]
+        val originalFileNameCandidate = originalFileNameList?.getOrNull(0)
 
-        val mimeType = URLConnection.guessContentTypeFromName(originalFileName) ?: "application/octet-stream"
-        Log.d(TAG, "handleUpload: Guessed MIME type for new file: $mimeType")
+        if (originalFileNameCandidate.isNullOrEmpty()) {
+             Log.w(TAG, "handleUploadJson: Original filename candidate is null or empty from session parameters for key: $uploadedFileKey.")
+              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Error 400: Original filename is empty or missing from session parameters."))
+        }
 
+        val controlCharsAndQuotesRegex = Regex("[\\x00-\\x1F\\x7F\"]")
+        val cleanedFromControlAndQuotes = originalFileNameCandidate.replace(controlCharsAndQuotesRegex, "").trim()
+        val cleanedFilename = cleanedFromControlAndQuotes.trimStart('/').trimEnd('/').trim()
+
+        val decodedOriginalFileName = try {
+            URLDecoder.decode(cleanedFilename, StandardCharsets.UTF_8.name())
+        } catch (e: Exception) {
+            Log.e(TAG, "handleUploadJson: Failed to decode filename '$cleanedFilename'", e)
+            cleanedFilename
+        }
+
+         if (decodedOriginalFileName.isEmpty()) {
+             Log.w(TAG, "handleUploadJson: Original filename became empty after cleaning/decoding.")
+             files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Original filename is empty after processing."))
+         }
+
+         if (decodedOriginalFileName.contains("/") || decodedOriginalFileName.contains("\\")) {
+             Log.w(TAG, "handleUploadJson: Original filename contains invalid characters (slashes). Filename: '$decodedOriginalFileName'")
+             files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Original filename cannot contain slashes."))
+         }
+
+        Log.d(TAG, "handleUploadJson: Final filename to use for creation: '$decodedOriginalFileName'")
+
+        val mimeTypeToCreate = URLConnection.guessContentTypeFromName(decodedOriginalFileName)
+            ?: guessMimeTypeFromExtension(decodedOriginalFileName)
+            ?: MIME_OCTET_STREAM
+        Log.d(TAG, "handleUploadJson: Determined MIME type for new file creation: $mimeTypeToCreate")
+
+
+        var newDocumentFile: DocumentFile? = null
 
         try {
-            val newDocumentFile = parentDirectory.createFile(mimeType, originalFileName)
+            newDocumentFile = parentDirectory.createFile(mimeTypeToCreate, decodedOriginalFileName)
 
             if (newDocumentFile == null) {
-                Log.e(TAG, "handleUpload: Failed to create new document file '$originalFileName' in ${parentDirectory.name}")
+                Log.e(TAG, "handleUploadJson: Failed to create new document file '$decodedOriginalFileName' in ${parentDirectory.name}. createFile returned null.")
                  files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-                 return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Failed to create file on device.")
+                 return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Failed to create file on device storage. A file with this name might already exist or permissions are insufficient."))
             }
 
             val outputStream = applicationContext.contentResolver.openOutputStream(newDocumentFile.uri)
 
             if (outputStream == null) {
-                 Log.e(TAG, "handleUpload: Failed to open output stream for new document file ${newDocumentFile.uri}")
+                 Log.e(TAG, "handleUploadJson: Failed to open output stream for new document file ${newDocumentFile.uri}. openOutputStream returned null.")
+                 try { newDocumentFile?.delete() } catch (e: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e) }
                  files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-                 newDocumentFile.delete()
-                 return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Failed to open stream for writing.")
+                 return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Failed to open stream for writing to device storage."))
             }
-
 
             val tempFileInputStream = FileInputStream(tempFilePath)
             tempFileInputStream.use { input ->
@@ -381,44 +586,60 @@ class WebServer(
                 }
             }
 
-            Log.i(TAG, "handleUpload: Successfully uploaded and saved '$originalFileName' to ${newDocumentFile.uri}")
-            return newFixedLengthResponse(Status.CREATED, "text/plain", "Successfully uploaded: ${newDocumentFile.name}")
+            Log.i(TAG, "handleUploadJson: Successfully uploaded and saved '$decodedOriginalFileName' to ${newDocumentFile.uri}")
+
+             val newLogicalFilePath = if (normalizedCurrentDirPath == "/") "/${newDocumentFile.name}" else "${normalizedCurrentDirPath}/${newDocumentFile.name}"
+             val cleanNewLogicalFilePath = newLogicalFilePath.replace(Regex("/+"), "/")
+
+             try {
+                val tempFile = File(tempFilePath)
+                if (tempFile.exists()) {
+                     val deleted = tempFile.delete()
+                     if (deleted) {
+                         Log.d(TAG, "handleUploadJson: Cleaned up temp file: $tempFilePath")
+                     } else {
+                          Log.w(TAG, "handleUploadJson: Failed to delete temp file: $tempFilePath")
+                     }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "handleUploadJson: Error cleaning up temp file: $tempFilePath", e)
+            }
+
+            return newJsonResponse(Status.CREATED, mapOf("status" to "success", "message" to "Successfully uploaded: ${newDocumentFile.name}", "path" to cleanNewLogicalFilePath))
 
         } catch (e: SecurityException) {
-             Log.e(TAG, "handleUpload: Security exception creating or writing file '$originalFileName' in ${parentDirectory.uri}", e)
-             return newFixedLengthResponse(Status.FORBIDDEN, "text/plain", "Error 403: Permission denied.")
+             Log.e(TAG, "handleUploadJson: Security exception creating or writing file '$decodedOriginalFileName' in ${parentDirectory.uri}", e)
+              try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
+              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
+             return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Error 403: Permission denied to write to this location."))
         } catch (e: FileNotFoundException) {
-             Log.e(TAG, "handleUpload: File not found (temp file?) or output stream failed: '$originalFileName'", e)
-             return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: File processing error during upload.")
+             Log.e(TAG, "handleUploadJson: File not found (temp file?) or output stream failed: '$decodedOriginalFileName'", e)
+              try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
+              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
+             return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: File processing error during upload (temp file missing or output stream failed)."))
         } catch (e: IOException) {
-            Log.e(TAG, "handleUpload: IO error during file copy for '$originalFileName'", e)
-            return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: IO Error during upload.")
+            Log.e(TAG, "handleUploadJson: IO error during file copy for '$decodedOriginalFileName'", e)
+             try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
+             files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
+            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: IO Error during file upload."))
         } catch (e: Exception) {
-            Log.e(TAG, "handleUpload: Unexpected error processing upload for '$originalFileName'", e)
-            return newFixedLengthResponse(Status.INTERNAL_ERROR, "text/plain", "Error 500: Unexpected server error during upload: ${e.message}")
-        } finally {
-            files.values.forEach { tempPath ->
-                try {
-                    val deleted = File(tempPath).delete()
-                    if (deleted) {
-                        Log.d(TAG, "handleUpload: Cleaned up temp file: $tempPath")
-                    } else {
-                         Log.w(TAG, "handleUpload: Failed to delete temp file: $tempPath")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "handleUpload: Error cleaning up temp file: $tempPath", e)
-                }
-            }
+            Log.e(TAG, "handleUploadJson: Unexpected error processing upload for '$decodedOriginalFileName'", e)
+             try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
+             files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
+            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Unexpected server error during upload: ${e.message}"))
         }
     }
 
 
     private fun serveFile(session: IHTTPSession, documentFile: DocumentFile): Response {
         try {
-            val mimeType = documentFile.type ?: URLConnection.guessContentTypeFromName(documentFile.name)
-                ?: getMimeTypeForFile(documentFile.name)
-                ?: "application/octet-stream"
-            Log.d(TAG, "serveFile: Determined MIME type: $mimeType for ${documentFile.name}")
+            val name = documentFile.name
+            val mimeType = documentFile.type
+                ?: name?.let { URLConnection.guessContentTypeFromName(it) }
+                ?: name?.let { guessMimeTypeFromExtension(it) }
+                ?: MIME_OCTET_STREAM
+
+            Log.d(TAG, "serveFile: Determined MIME type: $mimeType for ${name ?: "unnamed file"}")
 
             val inputStream: InputStream? = applicationContext.contentResolver.openInputStream(documentFile.uri)
 
@@ -429,17 +650,23 @@ class WebServer(
 
             val response = newChunkedResponse(Status.OK, mimeType, inputStream)
 
-            val escapedFileName = documentFile.name?.replace("\"", "\\\"") ?: "download"
+            val escapedFileName = name?.replace("\"", "\\\"") ?: "download"
 
-            val contentDispositionType = if (INLINE_MIME_PREFIXES.any { mimeType.startsWith(it) }) {
-                "inline"
-            } else {
-                "attachment"
-            }
+            val contentDispositionType = if (mimeType.startsWith("image/") || mimeType.startsWith("video/") || mimeType.startsWith("audio/") || mimeType == "text/plain" || mimeType == "application/pdf") {
+                 "inline"
+             } else {
+                 "attachment"
+             }
 
             response.addHeader("Content-Disposition", "$contentDispositionType; filename=\"$escapedFileName\"")
+            response.addHeader("Accept-Ranges", "bytes")
 
-            Log.d(TAG, "serveFile: Response created for ${documentFile.name} with Content-Disposition: $contentDispositionType")
+            val fileLength = documentFile.length()
+            if (fileLength >= 0) {
+                 response.addHeader("Content-Length", fileLength.toString())
+            }
+
+            Log.d(TAG, "serveFile: Response created for ${name ?: "unnamed"} with Content-Type: $mimeType, Content-Disposition: $contentDispositionType")
             return response
 
         } catch (e: FileNotFoundException) {
@@ -458,148 +685,47 @@ class WebServer(
         }
     }
 
-    private fun serveDirectoryListing(session: IHTTPSession, directoryDocument: DocumentFile): Response {
-        val uri = session.uri.removeSuffix("/")
-        val children = directoryDocument.listFiles() ?: emptyArray()
-
-        val sortedEntries = children.sortedWith(compareBy({ !it.isDirectory }, { it.name?.lowercase() ?: "" }))
-
-        val html = StringBuilder()
-        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>Index of ${uri}/</title>")
-        html.append("<style>")
-        html.append("body { font-family: sans-serif; margin: 20px; background-color: #121212; color: #e0e0e0; }")
-        html.append("h1 { color: #bb86fc; }")
-        html.append("table { width: 100%; border-collapse: collapse; margin-top: 20px; }")
-        html.append("th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #333333; }")
-        html.append("th { background-color: #222222; color: #ffffff; }")
-        html.append("tr:hover { background-color: #1e1e1e; }")
-        html.append("a { color: #03dac6; text-decoration: none; }")
-        html.append("a:hover { text-decoration: underline; }")
-        html.append(".file-size, .file-date { font-size: 0.8em; color: #b0b0b0; }")
-        html.append("form { display: inline-block; margin: 0 2px; }")
-        html.append("button { background-color: #625b71; color: white; border: none; padding: 4px 8px; text-align: center; text-decoration: none; display: inline-block; font-size: 12px; margin: 2px 0; cursor: pointer; border-radius: 4px; }")
-         html.append("button.delete { background-color: #cf6679; }")
-         html.append("input[type='text'], input[type='file'] { padding: 4px; margin: 0 2px; border-radius: 4px; border: 1px solid #333; background-color: #1e1e1e; color: #e0e0e0; font-size: 12px; }")
-         html.append(".actions { white-space: nowrap; }")
-         html.append("</style>")
-        html.append("</head><body><h1>Index of ${uri}/</h1><table>")
-        html.append("<tr><th>Name</th><th>Size</th><th>Last Modified</th><th>Actions</th></tr>")
-
-        if (directoryDocument.uri != sharedDirectoryUri) {
-             val currentUriPath = session.uri.removeSuffix("/")
-             val lastSlashIndex = currentUriPath.lastIndexOf('/')
-             val parentLinkUri = if (lastSlashIndex <= 0) "/" else currentUriPath.substring(0, lastSlashIndex)
-
-             html.append("<tr><td><a href=\"${parentLinkUri}\">..</a></td><td></td><td></td><td></td></tr>")
-        } else {
-            Log.d(TAG, "serveDirectoryListing: Not adding '..' link as this is the root.")
+    private fun guessMimeTypeFromExtension(filename: String): String? {
+        val extension = filename.substringAfterLast('.', "").lowercase()
+        return when (extension) {
+            "html", "htm" -> "text/html"
+            "css" -> "text/css"
+            "js" -> "application/javascript"
+            "json" -> MIME_JSON
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "svg" -> "image/svg+xml"
+            "pdf" -> "application/pdf"
+            "zip" -> "application/zip"
+            "tar" -> "application/x-tar"
+            "gz" -> "application/gzip"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "mp4" -> "video/mp4"
+            "webm" -> "video/webm"
+            "txt" -> "text/plain"
+            else -> null
         }
-
-        for (document in sortedEntries) {
-             if (document.uri == sharedDirectoryUri && uri.trim('/') == "") {
-                 continue
-             }
-
-            val name = document.name ?: "Unnamed"
-            val escapedName = name.replace("&", "&").replace("<", "<").replace(">", ">").replace("\"", "\"")
-            val documentUriSegment = name.encodeAsUriComponent()
-            val documentLinkUri = "${uri}/${documentUriSegment}".replace("//", "/")
-            val documentRelativePath = "${uri}/${name}".replace("//", "/").removePrefix("/")
-
-            html.append("<tr>")
-            html.append("<td>")
-            if (document.isDirectory) {
-                 html.append("<a href=\"${documentLinkUri}\">${escapedName}/</a>")
-            } else {
-                 html.append("<a href=\"${documentLinkUri}\">${escapedName}</a>")
-            }
-            html.append("</td>")
-
-            if (document.isFile) {
-                html.append("<td><span class=\"file-size\">${formatFileSize(document.length())}</span></td>")
-                html.append("<td><span class=\"file-date\">${formatDate(document.lastModified())}</span></td>")
-            } else {
-                html.append("<td></td><td></td>")
-            }
-
-            html.append("<td class=\"actions\">")
-
-            if (document.uri != sharedDirectoryUri) {
-                 html.append("<form action=\"/rename\" method=\"post\">")
-                 html.append("<input type=\"hidden\" name=\"path\" value=\"${documentRelativePath}\">")
-                 html.append("<input type=\"text\" name=\"newName\" value=\"${escapedName}\">")
-                 html.append("<button type=\"submit\">Rename</button>")
-                 html.append("</form>")
-            }
-
-             if (document.uri != sharedDirectoryUri) {
-                 html.append("<form action=\"/\" method=\"post\" onsubmit=\"return confirm('Are you sure you want to delete \\'${escapedName}\\'?');\">")
-                 html.append("<input type=\"hidden\" name=\"_method\" value=\"DELETE\">")
-                 html.append("<input type=\"hidden\" name=\"path\" value=\"${documentRelativePath}\">")
-                 html.append("<button type=\"submit\" class=\"delete\">Delete</button>")
-                 html.append("</form>")
-             }
-
-            html.append("</td>")
-            html.append("</tr>")
-        }
-
-        html.append("</table>")
-
-         val currentRelativePathForForms = uri.removePrefix("/")
-
-         html.append("<h2>Actions in ${uri}/</h2>")
-
-         html.append("<form action=\"/mkdir\" method=\"post\">")
-         html.append("<input type=\"hidden\" name=\"path\" value=\"${currentRelativePathForForms}\">")
-         html.append("Create directory: <input type=\"text\" name=\"newDirName\" placeholder=\"New Directory Name\">")
-         html.append("<button type=\"submit\">Create</button>")
-         html.append("</form>")
-
-         html.append("<hr>")
-
-         html.append("<form action=\"/upload\" method=\"post\" enctype=\"multipart/form-data\">")
-         html.append("<input type=\"hidden\" name=\"path\" value=\"${currentRelativePathForForms}\">")
-         html.append("Upload file: <input type=\"file\" name=\"file\">")
-         html.append("<button type=\"submit\">Upload</button>")
-         html.append("</form>")
-
-
-        html.append("</body></html>")
-
-        return newFixedLengthResponse(Status.OK, "text/html", html.toString())
-    }
-
-    private fun formatFileSize(size: Long): String {
-        if (size <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-        return String.format(Locale.getDefault(), "%.1f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
-    }
-
-    private fun formatDate(time: Long): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-        return sdf.format(Date(time))
     }
 
     private fun String.encodeAsUriComponent(): String {
         return try {
-            URLEncoder.encode(this, "UTF-8").replace("+", "%20")
+            URLEncoder.encode(this, StandardCharsets.UTF_8.name()).replace("+", "%20")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to encode URI component: $this", e)
             this
         }
     }
 
-
     override fun stop() {
-        Log.d(TAG, "WebServer: Stopping server...")
+        Log.d(TAG, "WebServer: Stopping NanoHTTPD instance...")
         try {
             super.stop()
-            Log.d(TAG, "WebServer: Server stop() called. isAlive: ${isAlive}")
+            Log.d(TAG, "WebServer: NanoHTTPD stop() called.")
         } catch (e: Exception) {
-            Log.e(TAG, "WebServer: Error stopping server", e)
+            Log.e(TAG, "WebServer: Error stopping NanoHTTPD instance", e)
         }
-        Log.d(TAG, "WebServer: Server stop method finished.")
+        Log.d(TAG, "WebServer: NanoHTTPD stop method finished.")
     }
 }

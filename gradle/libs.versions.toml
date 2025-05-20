@@ -3,34 +3,34 @@
 # ================================================================================
 [versions]
 # Keep core AndroidX versions needed outside Compose BOM
-agp = "8.10.0" # Keep the same
-kotlin = "2.0.21" # Keep the same
-coreKtx = "1.10.1" # Keep the same
-lifecycleRuntimeKtx = "2.6.1" # Keep the same
-appcompat = "1.7.0" # Keep the same
+agp = "8.10.0"
+kotlin = "2.0.21"
+coreKtx = "1.10.1"
+lifecycleRuntimeKtx = "2.6.1"
+appcompat = "1.7.0"
 
 # Testing
-junit = "4.13.2" # Keep the same
-junitVersion = "1.1.5" # Keep the same
-espressoCore = "3.5.1" # Keep the same
+junit = "4.13.2"
+junitVersion = "1.1.5"
+espressoCore = "3.5.1"
 
-# Compose BOM - Defines versions for many compose libraries (like ui, material3)
-# Use a recent BOM version. 2024.09.00 is quite recent.
+# Compose BOM
 composeBom = "2024.09.00"
 
-# Activity Compose - Use a recent version compatible with your compileSdk and BOM
-# Using 1.8.0 as it was already present and is compatible.
+# Activity Compose
 activityCompose = "1.8.0"
 
 # NanoHTTPD
-nanohttpd = "2.3.1" # Keep the same
+nanohttpd = "2.3.1"
 
 # Storage Access Framework / DocumentFile
-documentFile = "1.0.1" # Add version for DocumentFile
+documentFile = "1.0.1"
 
-# REMOVED: Redundant/conflicting dependencies based on TOML cleanup
-# REMOVED: Ktor and Logback dependencies as they are commented out in build.gradle.kts
-# REMOVED: Redundant explicit Compose library versions that should come from the BOM or were duplicates
+# JSON library
+orgjson = "20231013"
+
+localbroadcastmanager = "1.1.0"
+
 
 [libraries]
 # Core AndroidX
@@ -38,19 +38,19 @@ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = 
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
 androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 
-# Activity Compose (use one version)
+# Activity Compose
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 
-# Compose BOM - Import the BOM
+# Compose BOM
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
-# Dependencies managed by the BOM (no version specified here, just group and name)
+# Dependencies managed by the BOM
 androidx-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
-androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test.junit4" } # Corrected name
-androidx-material3 = { group = "androidx.compose.material3", name = "material3" } # Use material3 from BOM
+androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test.junit4" }
+androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -61,14 +61,13 @@ androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-co
 nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
 
 # Storage Access Framework / DocumentFile
-androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" } # Add library entry
+androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" }
 
-# REMOVED: Redundant and conflicting library declarations
-# androidx-activity-compose-v1101 = { module = "androidx.activity:activity-compose", version.ref = "androidxActivityCompose" }
-# androidx-activity-compose-v170 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
-# androidx-material = { module = "androidx.compose.material:material", version.ref = "material" }
-# material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
-# ui = { module = "androidx.compose.ui:ui", version.ref = "ui" }
+# JSON library
+orgjson = { module = "org.json:json", version.ref = "orgjson" }
+
+# FIX: Add library entry for LocalBroadcastManager back
+androidx-localbroadcastmanager = { group = "androidx.localbroadcastmanager", name = "localbroadcastmanager", version.ref = "localbroadcastmanager" }
 
 
 [plugins]

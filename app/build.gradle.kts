@@ -30,12 +30,11 @@ android {
         }
     }
     compileOptions {
-        // Keep 1.8 for compatibility, especially with older libraries like NanoHTTPD
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
     kotlinOptions {
-        jvmTarget = "1.8" // Match compileOptions
+        jvmTarget = "1.8"
         languageVersion = "1.9"
         apiVersion = "1.9"
     }
@@ -59,8 +58,6 @@ android {
             excludes += "kotlin/**"
             excludes += "**/*.kotlin_metadata"
             excludes += "**/*.kotlin_builtins"
-            // REMOVE THIS LINE (related to Netty/Ktor) - Already commented out in your file, good.
-            // excludes += "META-INF/io.netty.versions.properties"
         }
     }
 }
@@ -94,12 +91,11 @@ dependencies {
     implementation(libs.nanohttpd)
 
     // Storage Access Framework / DocumentFile
-    implementation(libs.androidx.documentfile) // Add documentfile dependency
+    implementation(libs.androidx.documentfile)
 
-    // REMOVED: Redundant/conflicting dependencies based on TOML cleanup
-    // implementation(libs.ui)
-    // implementation(libs.androidx.material)
-    // implementation(libs.androidx.activity.compose.v170)
-    // implementation(libs.androidx.activity.compose.v1101)
-    // implementation(libs.material3)
+    // JSON library for API responses
+    implementation(libs.orgjson)
+
+    // FIX: Add the LocalBroadcastManager dependency back
+    implementation(libs.androidx.localbroadcastmanager)
 }
