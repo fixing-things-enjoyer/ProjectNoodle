@@ -1,10 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <!-- Tokyo Night Dark Colors (approximate matches from Compose palette) -->
+    <color name="tokyo_night_background">#1A1B26</color>
+    <color name="tokyo_night_primary">#7DCFFF</color>
+    <color name="tokyo_night_text">#A9B1D6</color>
+    <color name="tokyo_night_surface">#1F2335</color>
+    <color name="tokyo_night_accent_green">#9ECE6A</color>
+    <color name="tokyo_night_accent_purple">#BB9AF7</color>
+    <color name="tokyo_night_error">#E06C75</color>
+
+    <!-- Old colors - updated to reference new Tokyo Night colors for consistency -->
+    <color name="purple_200">@color/tokyo_night_primary</color>
+    <color name="purple_500">@color/tokyo_night_primary</color>
+    <color name="purple_700">@color/tokyo_night_primary</color>
+    <color name="teal_200">@color/tokyo_night_accent_green</color>
+    <color name="teal_700">@color/tokyo_night_accent_green</color>
+    <color name="black">@color/tokyo_night_background</color>
+    <color name="white">@color/tokyo_night_text</color>
 </resources>

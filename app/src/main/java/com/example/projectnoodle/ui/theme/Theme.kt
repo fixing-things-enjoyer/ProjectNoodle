@@ -16,41 +16,47 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
+    primary = TokyoNightPrimary,
+    onPrimary = TokyoNightOnPrimary,
+    primaryContainer = TokyoNightPrimaryContainer,
+    onPrimaryContainer = TokyoNightOnPrimaryContainer,
+    secondary = TokyoNightSecondary,
+    onSecondary = TokyoNightOnSecondary,
+    secondaryContainer = TokyoNightSecondaryContainer,
+    onSecondaryContainer = TokyoNightOnSecondaryContainer,
+    tertiary = TokyoNightTertiary,
+    onTertiary = TokyoNightOnTertiary,
+    tertiaryContainer = TokyoNightTertiaryContainer,
+    onTertiaryContainer = TokyoNightOnTertiaryContainer,
+    background = TokyoNightBackground,
+    onBackground = TokyoNightOnBackground,
+    surface = TokyoNightSurface,
+    onSurface = TokyoNightOnSurface,
+    surfaceVariant = TokyoNightSurfaceVariant,
+    onSurfaceVariant = TokyoNightOnSurfaceVariant,
+    error = TokyoNightError,
+    onError = TokyoNightOnError
 )
 
 private val LightColorScheme = lightColorScheme(
     primary = Purple40,
     secondary = PurpleGrey40,
     tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
+    // You can define a "light Tokyo Night" palette here if you plan to support light theme
 )
 
 @Composable
 fun ProjectNoodleTheme(
-    darkTheme: Boolean = true, // <-- Changed default to TRUE for dark mode by default
+    darkTheme: Boolean = true, // Your app defaults to dark theme
     // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
-            // If darkTheme is true (our default), use dynamicDarkColorScheme
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-
         darkTheme -> DarkColorScheme
         else -> LightColorScheme
     }
@@ -58,11 +64,10 @@ fun ProjectNoodleTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            // Setting status bar color based on *the selected color scheme's* primary color
-            window.statusBarColor = colorScheme.primary.toArgb()
-            // Adjusting status bar icons color based on *whether* the selected theme is light or dark
-            // This should probably match the theme being applied, which is controlled by the darkTheme parameter
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme // Icons are light if darkTheme is true
+            // Setting status bar color to match the background color for a cohesive Tokyo Night look
+            window.statusBarColor = colorScheme.background.toArgb()
+            // Adjusting status bar icons color based on whether the theme is light or dark
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }
 

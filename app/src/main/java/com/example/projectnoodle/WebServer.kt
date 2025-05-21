@@ -3,12 +3,10 @@ package com.example.projectnoodle
 
 import android.content.Context
 import android.net.Uri
-// import android.provider.DocumentsContract // Not used directly
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Response.Status
-import fi.iki.elonen.NanoHTTPD.Method
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
@@ -17,10 +15,7 @@ import java.io.InputStream
 import java.net.URLConnection
 import java.net.URLDecoder
 import java.net.URLEncoder
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.HashMap
-import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
@@ -29,19 +24,30 @@ private const val TAG = "ProjectNoodleWebServer" // Renamed TAG for clarity
 
 private const val MIME_JSON = "application/json" // Define JSON MIME type
 private const val MIME_OCTET_STREAM = "application/octet-stream" // Default binary mime type
-// --- End FIX ---
+
+// Define the callback interface that the Service will implement
+interface ConnectionApprovalListener {
+    fun onNewClientConnectionAttempt(clientIp: String)
+}
 
 class WebServer(
     port: Int,
     private val applicationContext: Context, // Keep context reference
     private val sharedDirectoryUri: Uri, // Keep URI reference
-    private val serverIpAddress: String? // Keep IP reference
+    private val serverIpAddress: String?, // Keep IP reference
+    private val requireApprovalEnabled: Boolean,
+    private val approvalListener: ConnectionApprovalListener? // NEW: Listener for approval requests
+
 ) : NanoHTTPD(port) {
 
     private val rootDocumentFile = DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
 
+    private val approvedClients = mutableSetOf<String>() // Store client identifiers (e.g., IP addresses)
+
     init {
         Log.d(TAG, "WebServer: Initialized with port $port and shared directory URI ${sharedDirectoryUri.toString()}")
+        Log.d(TAG, "WebServer: Connection approval required: $requireApprovalEnabled")
+
 
         if (rootDocumentFile == null || !rootDocumentFile.exists() || !rootDocumentFile.isDirectory) {
             Log.e(TAG, "WebServer: Invalid or inaccessible root DocumentFile for URI: ${sharedDirectoryUri.toString()}")
@@ -89,7 +95,22 @@ class WebServer(
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
         val method = session.method
-        Log.d(TAG, "WebServer: Received request: $method $uri")
+        val clientIp = session.getRemoteIpAddress() ?: "Unknown"
+        Log.d(TAG, "WebServer: Received request from $clientIp: $method $uri")
+
+        if (requireApprovalEnabled) {
+            Log.d(TAG, "WebServer: Approval is required. Checking client $clientIp...")
+            if (clientIp != "Unknown" && approvedClients.contains(clientIp)) {
+                Log.d(TAG, "WebServer: Client $clientIp is approved. Proceeding with request.")
+                // Client is approved, proceed as normal
+            } else {
+                Log.d(TAG, "WebServer: Client $clientIp is NOT approved. Returning unauthorized response and informing listener.")
+                // Client is NOT approved, inform the listener and return the specific unauthorized response
+                approvalListener?.onNewClientConnectionAttempt(clientIp) // NEW: Call listener
+                return handleUnauthorizedClientResponse(session) // NEW: Delegate to new function
+            }
+        }
+
 
         if (Method.OPTIONS == method) {
             val preflightResponse = newFixedLengthResponse(Status.OK, "text/plain", "")
@@ -188,10 +209,11 @@ class WebServer(
                  }
             }
 
+            // MODIFIED: This block handles serving index.html and other bundled assets
             (requestUrlPathClean == "/" ||
              requestUrlPathClean.startsWith("/assets/") ||
-             requestUrlPathClean == "/vite.svg" ||
-             requestUrlPathClean == "/index.css")
+             requestUrlPathClean == "/project_noodle.png" ||
+             requestUrlPathClean == "/index.css") // Add any other top-level assets here
              && method == Method.GET -> {
 
                 val assetPath = when {
@@ -206,25 +228,31 @@ class WebServer(
                         val reader = indexHtmlStream.bufferedReader()
                         val indexHtmlContent = reader.use { it.readText() }
 
+                        // Dynamically determine the base URL for API calls
+                        // Use the IP address and listening port that this server instance is using
                         val serverBaseUrl = if (serverIpAddress != null) "http://$serverIpAddress:$listeningPort" else null
                         val headEndTag = "</head>"
+                        // Inject the global JavaScript variable for the frontend
                         val scriptToInject = serverBaseUrl?.let { url ->
                             "<script>\n" +
                             "  window.__API_BASE_URL__ = \"$url\";\n" +
                             "  console.log('Injected API Base URL:', window.__API_BASE_URL__);\n" +
                             "</script>\n"
-                        } ?: ""
+                        } ?: "" // If IP is null (e.g., no Wi-Fi), inject an empty script or nothing
 
                         val modifiedHtmlContent = if (indexHtmlContent.contains(headEndTag)) {
+                            // Inject before </head>
                             indexHtmlContent.replace(headEndTag, scriptToInject + headEndTag)
                         } else {
+                            // Fallback: if </head> not found, inject at the start of <body>
                             Log.w(TAG, "WebServer: </head> not found in index.html, injecting script at start of body.")
-                            indexHtmlContent.replace("<body>", "<body>\n$scriptToInject")
+                            indexHtmlContent.replace("<body>", "<body>\n$scriptToInject") // Assuming <body> exists
                         }
                          val mimeType = "text/html"
                          newFixedLengthResponse(Status.OK, mimeType, modifiedHtmlContent)
 
                     } else {
+                        // Serve other assets directly (CSS, JS bundles, images, etc.)
                         val assetStream: InputStream = applicationContext.assets.open(assetPath)
                         val mimeType = guessMimeTypeFromExtension(assetPath) ?: MIME_OCTET_STREAM
                         newChunkedResponse(Status.OK, mimeType, assetStream)
@@ -249,6 +277,49 @@ class WebServer(
 
         return response
     }
+
+     // MODIFIED: Renamed from handleUnauthorizedClient and removed WWW-Authenticate header
+     private fun handleUnauthorizedClientResponse(session: IHTTPSession): Response {
+         val uri = session.uri
+         val requestUrlPath = uri.split('?')[0]
+         val requestUrlPathClean = "/" + requestUrlPath.trim('/').replace(Regex("/+"), "/")
+
+         val response: Response = if (requestUrlPathClean.startsWith("/api/")) {
+             // Return JSON error for API requests
+             newJsonResponse(Status.UNAUTHORIZED, mapOf("status" to "error", "message" to "Authorization required. Please approve the connection on the device then refresh."))
+         } else {
+             // Return HTML message for other requests
+             newFixedLengthResponse(Status.UNAUTHORIZED, "text/html",
+                 "<!DOCTYPE html>\n" +
+                 "<html>\n" +
+                 "<head>\n" +
+                 "    <meta charset=\"UTF-8\">\n" +
+                 "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" +
+                 "    <title>Authorization Required</title>\n" +
+                 "    <style>\n" +
+                 "        body { font-family: sans-serif; text-align: center; padding: 50px; background-color: #282c34; color: #abb2bf; }\n" +
+                 "        h1 { color: #e06c75; }\n" +
+                 "        p { margin-bottom: 20px; }\n" +
+                 "        strong { color: #61afef; }\n" +
+                 "        small { color: #5c6370; }\n" +
+                 "    </style>\n" +
+                 "</head>\n" +
+                 "<body>\n" +
+                 "    <h1>Connection Approval Required</h1>\n" +
+                 "    <p>Please approve this connection on the device running the server.</p>\n" +
+                 "    <p>Check your device's notifications, then refresh this page.</p>\n" +
+                 "    <p><strong>Your IP address: ${session.getRemoteIpAddress()}</strong></p>\n" +
+                 "    <small>If you do not see a notification, ensure notifications are enabled for the app.</small>\n" +
+                 "</body>\n" +
+                 "</html>"
+             )
+         }
+
+         // REMOVED: response.addHeader("WWW-Authenticate", "Basic realm=\"Project Noodle Approval\"")
+         response.addHeader("Access-Control-Allow-Origin", "*") // Still allow CORS for the error response
+         return response
+     }
+
 
      private fun newJsonResponse(status: Status, jsonMap: Map<String, Any?>): Response {
         val jsonObject = JSONObject(jsonMap)
@@ -728,4 +799,20 @@ class WebServer(
         }
         Log.d(TAG, "WebServer: NanoHTTPD stop method finished.")
     }
+
+     fun approveClient(clientIdentifier: String) {
+         Log.i(TAG, "WebServer: Approving client: $clientIdentifier")
+         approvedClients.add(clientIdentifier)
+         // TODO: Persist approvedClients set in SharedPreferences
+     }
+
+     fun denyClient(clientIdentifier: String) {
+         Log.i(TAG, "WebServer: Denying client: $clientIdentifier")
+         approvedClients.remove(clientIdentifier)
+          // TODO: Update persisted approvedClients set in SharedPreferences
+     }
+
+     fun isClientApproved(clientIdentifier: String): Boolean {
+         return approvedClients.contains(clientIdentifier)
+     }
 }

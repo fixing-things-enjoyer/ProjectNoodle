@@ -77,6 +77,7 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    implementation(libs.androidx.preference.ktx)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
@@ -96,6 +97,7 @@ dependencies {
     // JSON library for API responses
     implementation(libs.orgjson)
 
-    // FIX: Add the LocalBroadcastManager dependency back
     implementation(libs.androidx.localbroadcastmanager)
+
+    implementation(libs.material)
 }
