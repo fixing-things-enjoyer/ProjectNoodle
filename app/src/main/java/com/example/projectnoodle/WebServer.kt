@@ -7,6 +7,8 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Response.Status
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileNotFoundException
@@ -15,11 +17,7 @@ import java.io.InputStream
 import java.net.URLConnection
 import java.net.URLDecoder
 import java.net.URLEncoder
-import java.util.HashMap
-import org.json.JSONArray
-import org.json.JSONObject
 import java.nio.charset.StandardCharsets
-import android.os.Environment
 
 private const val TAG = "ProjectNoodleWebServer" // Renamed TAG for clarity
 
@@ -31,7 +29,6 @@ interface ConnectionApprovalListener {
     fun onNewClientConnectionAttempt(clientIp: String)
 }
 
-// MODIFIED: Added 'open' keyword to allow inheritance
 open class WebServer(
     port: Int,
     private val applicationContext: Context, // Keep context reference
@@ -39,24 +36,20 @@ open class WebServer(
     private val serverIpAddress: String?, // Keep IP reference
     private val requireApprovalEnabled: Boolean,
     private val approvalListener: ConnectionApprovalListener? // Listener for approval requests
-    // REMOVED: protected val hasManageAllFilesAccess: Boolean // NEW: Add this to constructor (using protected for subclasses)
 ) : NanoHTTPD(port) {
 
     // FIX: Added the approvedClients member variable
     private val approvedClients = mutableSetOf<String>()
 
-    // MODIFIED: rootDocumentFile initialization to ONLY use DocumentFile.fromTreeUri (SAF-only)
     private val rootDocumentFile: DocumentFile? = DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
 
 
     init {
-        Log.d(TAG, "WebServer: Initialized with port $port and shared directory URI ${sharedDirectoryUri.toString()}")
+        Log.d(TAG, "WebServer: Initialized with port $port and shared directory URI $sharedDirectoryUri")
         Log.d(TAG, "WebServer: Connection approval required: $requireApprovalEnabled")
-        // REMOVED: Log.d(TAG, "WebServer: Has All Files Access (passed): $hasManageAllFilesAccess")
-
 
         if (rootDocumentFile == null || !rootDocumentFile.exists() || !rootDocumentFile.isDirectory) {
-            Log.e(TAG, "WebServer: Invalid or inaccessible root DocumentFile for URI: ${sharedDirectoryUri.toString()}")
+            Log.e(TAG, "WebServer: Invalid or inaccessible root DocumentFile for URI: $sharedDirectoryUri")
             // The Service checks this before creating the WebServer instance now.
         } else {
             Log.d(TAG, "WebServer: Root DocumentFile resolved: ${rootDocumentFile.name} (URI: ${rootDocumentFile.uri})")
@@ -102,7 +95,7 @@ open class WebServer(
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
         val method = session.method
-        val clientIp = session.getRemoteIpAddress() ?: "Unknown"
+        val clientIp = session.remoteIpAddress ?: "Unknown"
         Log.d(TAG, "WebServer: Received request from $clientIp: $method $uri")
 
         if (requireApprovalEnabled) {
@@ -310,7 +303,7 @@ open class WebServer(
                  "    <h1>Connection Approval Required</h1>\n" +
                  "    <p>Please approve this connection on the device running the server.</p>\n" +
                  "    <p>Check your device's notifications, then refresh this page.</p>\n" +
-                 "    <p><strong>Your IP address: ${session.getRemoteIpAddress()}</strong></p>\n" +
+                 "    <p><strong>Your IP address: ${session.remoteIpAddress}</strong></p>\n" +
                  "    <small>If you do not see a notification, ensure notifications are enabled for the app.</small>\n" +
                  "</body>\n" +
                  "</html>"
@@ -346,7 +339,7 @@ open class WebServer(
 
 
     private fun serveJsonDirectoryListing(requestedPath: String, directoryDocument: DocumentFile): Response {
-        val children = directoryDocument.listFiles() ?: emptyArray()
+        val children = directoryDocument.listFiles()
         val sortedEntries = children.sortedWith(compareBy({ !it.isDirectory }, { it.name?.lowercase() ?: "" }))
 
         val jsonArray = JSONArray()
@@ -651,7 +644,9 @@ open class WebServer(
 
             if (outputStream == null) {
                  Log.e(TAG, "handleUploadJson: Failed to open output stream for new document file ${newDocumentFile.uri}. openOutputStream returned null.")
-                 try { newDocumentFile?.delete() } catch (e: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e) }
+                 try {
+                     newDocumentFile.delete()
+                 } catch (e: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile.uri}", e) }
                  files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
                  return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Failed to open stream for writing to device storage."))
             }

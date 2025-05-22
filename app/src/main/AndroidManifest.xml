@@ -42,7 +42,6 @@
             android:name=".WebServerService"
             android:foregroundServiceType="dataSync"
             android:exported="false" >
-             <!-- Add intent filter if needed for specific actions, but simple start/stop doesn't require one -->
         </service>
 
     </application>

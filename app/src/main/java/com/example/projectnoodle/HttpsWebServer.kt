@@ -4,29 +4,25 @@ package com.example.projectnoodle
 import android.content.Context
 import android.net.Uri
 import android.util.Log
-import fi.iki.elonen.NanoHTTPD
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.BasicConstraints
 import org.bouncycastle.asn1.x509.Extension
 import org.bouncycastle.asn1.x509.KeyUsage
 import org.bouncycastle.cert.X509CertificateHolder
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
-import org.bouncycastle.jce.provider.BouncyCastleProvider // Keep for Security.insertProviderAt if moved back
 import org.bouncycastle.operator.ContentSigner
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
+import java.io.IOException
 import java.math.BigInteger
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.SecureRandom
-import java.security.Security // Keep for Security.insertProviderAt if moved back
 import java.security.cert.X509Certificate
 import java.util.Date
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
-
-import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
-import java.io.IOException
 
 private const val TAG = "ProjectNoodleHttpsServer"
 private const val KEYSTORE_PASSWORD = ""
@@ -52,7 +48,6 @@ class HttpsWebServer(
 
     // Bouncy Castle provider registration is done in MainActivity.onCreate()
     // using Security.insertProviderAt(BouncyCastleProvider(), 1)
-
     init {
         Log.d(TAG, "HttpsWebServer: Initialized with port $port. Attempting to set up HTTPS.")
 
@@ -102,12 +97,10 @@ class HttpsWebServer(
         val notBefore = Date(System.currentTimeMillis() - 24 * 60 * 60 * 1000)
         val notAfter = Date(System.currentTimeMillis() + CERT_VALIDITY_DAYS * 24L * 60 * 60 * 1000)
 
-        // MODIFIED: Remove .setProvider() from JcaContentSignerBuilder.
         // Rely on the BouncyCastleProvider being inserted at position 1 in MainActivity.
         // JcaContentSignerBuilder will internally call Signature.getInstance(SIG_ALG),
         // which should now find the BC implementation due to its high priority.
         val contentSigner: ContentSigner = JcaContentSignerBuilder(SIG_ALG)
-            // .setProvider(BouncyCastleProvider.PROVIDER_NAME) // REMOVED THIS LINE
             .build(keyPair.private)
 
         val certBuilder = JcaX509v3CertificateBuilder(
@@ -128,9 +121,7 @@ class HttpsWebServer(
 
         val certHolder: X509CertificateHolder = certBuilder.build(contentSigner)
 
-        // MODIFIED: Remove .setProvider() from JcaX509CertificateConverter as well.
         val cert: X509Certificate = JcaX509CertificateConverter()
-            // .setProvider(BouncyCastleProvider.PROVIDER_NAME) // REMOVED THIS LINE
             .getCertificate(certHolder)
 
         cert.checkValidity(Date())

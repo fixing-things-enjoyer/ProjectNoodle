@@ -12,7 +12,6 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
-import android.text.format.Formatter
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.documentfile.provider.DocumentFile
@@ -21,9 +20,6 @@ import androidx.preference.PreferenceManager
 import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
 import java.net.ServerSocket
-import java.net.InetAddress
-import android.os.Environment
-import java.io.File // Required for DocumentFile.fromFile
 import java.net.URLDecoder
 
 private const val TAG = "ProjectNoodleService"
@@ -45,7 +41,6 @@ const val ACTION_QUERY_STATUS = "com.example.projectnoodle.QUERY_STATUS"
 
 const val EXTRA_SHARED_DIRECTORY_URI = "com.example.projectnoodle.SHARED_DIRECTORY_URI"
 const val EXTRA_REQUIRE_APPROVAL = "com.example.projectnoodle.REQUIRE_APPROVAL"
-// REMOVED: const val EXTRA_HAS_ALL_FILES_ACCESS = "com.example.projectnoodle.HAS_ALL_FILES_ACCESS"
 const val EXTRA_USE_HTTPS = "com.example.projectnoodle.USE_HTTPS"
 
 const val EXTRA_SERVER_IS_RUNNING = "com.example.projectnoodle.IS_RUNNING"
@@ -55,8 +50,8 @@ const val EXTRA_SERVER_IP = "com.example.projectnoodle.SERVER_IP"
 const val EXTRA_SERVER_PORT = "com.example.projectnoodle.SERVER_PORT"
 const val EXTRA_SHARED_DIRECTORY_NAME = "com.example.projectnoodle.SHARED_DIRECTORY_NAME"
 
-public const val PREF_REQUIRE_APPROVAL = "pref_require_approval"
-public const val PREF_USE_HTTPS = "pref_use_https"
+const val PREF_REQUIRE_APPROVAL = "pref_require_approval"
+const val PREF_USE_HTTPS = "pref_use_https"
 
 
 class WebServerService : Service(), ConnectionApprovalListener {
@@ -68,9 +63,8 @@ class WebServerService : Service(), ConnectionApprovalListener {
     private var currentOperationalState: String = "Stopped"
     private var requireApprovalEnabled: Boolean = false
     private var useHttps: Boolean = false
-    // REMOVED: private var hasManageAllFilesAccess: Boolean = false
 
-    private var isForegroundServiceStarted = false // NEW: Track if startForeground has been successfully called
+    private var isForegroundServiceStarted = false
 
     private lateinit var localBroadcastManager: LocalBroadcastManager
 
@@ -85,8 +79,6 @@ class WebServerService : Service(), ConnectionApprovalListener {
         createNotificationChannel()
         createApprovalNotificationChannel()
         loadPreferences()
-        // REMOVED: updateManageAllFilesAccessStatus()
-        // Do not call sendStatusUpdate() here, wait for onStartCommand
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -96,7 +88,6 @@ class WebServerService : Service(), ConnectionApprovalListener {
             ACTION_START_SERVER -> {
                 currentOperationalState = "Starting" // Set initial state
 
-                // MODIFIED: Call startForeground immediately with a "Starting..." notification
                 // This must happen before any potentially long or blocking operations.
                 if (!isForegroundServiceStarted) {
                     val startingNotification = buildNotification().build() // Build with "Starting..." state
@@ -116,16 +107,14 @@ class WebServerService : Service(), ConnectionApprovalListener {
                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
                 }
                 val newRequireApprovalEnabled = intent.getBooleanExtra(EXTRA_REQUIRE_APPROVAL, false)
-                // REMOVED: val newHasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, false)
                 val newUseHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, false)
-                Log.d(TAG, "Processing START_SERVER. requireApproval=$newRequireApprovalEnabled, useHttps=$newUseHttps") // REMOVED: hasAllFilesAccess log
+                Log.d(TAG, "Processing START_SERVER. requireApproval=$newRequireApprovalEnabled, useHttps=$newUseHttps")
 
                 this.requireApprovalEnabled = newRequireApprovalEnabled
-                // REMOVED: this.hasManageAllFilesAccess = newHasManageAllFilesAccess
                 this.useHttps = newUseHttps
 
                 if (uriToShare != null) {
-                    if (server != null && server!!.isAlive && uriToShare == currentSharedDirectoryUri && newRequireApprovalEnabled == requireApprovalEnabled && newUseHttps == useHttps) { // REMOVED: hasManageAllFilesAccess from check
+                    if (server != null && server!!.isAlive && uriToShare == currentSharedDirectoryUri && newRequireApprovalEnabled == requireApprovalEnabled && newUseHttps == useHttps) {
                         Log.d(TAG, "Server already running with the same config.")
                         currentOperationalState = "Running" // Ensure correct state
                         sendStatusUpdate() // Just update UI and notification content
@@ -138,7 +127,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
                     }
 
                     currentSharedDirectoryUri = uriToShare
-                    startServerLogic(uriToShare) // Renamed to avoid confusion
+                    startServerLogic(uriToShare)
                 } else {
                     Log.w(TAG, "START_SERVER action with null URI.")
                     if (server == null || !server!!.isAlive) {
@@ -159,7 +148,6 @@ class WebServerService : Service(), ConnectionApprovalListener {
                 } else {
                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
                 }
-                // REMOVED: this.hasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, this.hasManageAllFilesAccess)
                 this.useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, this.useHttps)
                 if (uriFromQuery != null) this.currentSharedDirectoryUri = uriFromQuery
 
@@ -318,7 +306,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
              }
          } else { // Server is stopped or failed
              if (isForegroundServiceStarted) {
-                 stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                 stopForeground(STOP_FOREGROUND_REMOVE)
                  isForegroundServiceStarted = false
                  Log.d(TAG, "Called stopForeground(STOP_FOREGROUND_REMOVE) for state: ${currentOperationalState}")
              }
@@ -349,12 +337,6 @@ class WebServerService : Service(), ConnectionApprovalListener {
 
      private fun getServerStatusText(isRunning: Boolean): String {
           val directoryName = currentSharedDirectoryUri?.let { uri ->
-              // REMOVED: hasManageAllFilesAccess check here as it's no longer relevant
-              /*
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasManageAllFilesAccess && uri.toString() == Environment.getExternalStorageDirectory().toURI().toString()) {
-                  return@let "Internal Storage (All Files Access)"
-              }
-              */
               try {
                   val documentFile = if (uri.scheme == "content") {
                       DocumentFile.fromTreeUri(applicationContext, uri)
@@ -403,14 +385,8 @@ class WebServerService : Service(), ConnectionApprovalListener {
          }
     }
 
-    private fun sendStatusUpdate(): Unit {
+    private fun sendStatusUpdate() {
         val directoryNameForBroadcast = currentSharedDirectoryUri?.let { uri ->
-             // REMOVED: hasManageAllFilesAccess check here as it's no longer relevant
-             /*
-             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasManageAllFilesAccess && uri.toString() == Environment.getExternalStorageDirectory().toURI().toString()) {
-                 return@let "Internal Storage (All Files Access)"
-             }
-             */
              try {
                  val documentFile = if (uri.scheme == "content") {
                      DocumentFile.fromTreeUri(applicationContext, uri)
@@ -439,14 +415,14 @@ class WebServerService : Service(), ConnectionApprovalListener {
             putExtra(EXTRA_USE_HTTPS, useHttps)
         }
         localBroadcastManager.sendBroadcast(statusIntent)
-        Log.d(TAG, "Sent status broadcast. State: $currentOperationalState, Running: ${server?.isAlive}, Dir: $directoryNameForBroadcast, Approval Req: $requireApprovalEnabled, HTTPS: $useHttps") // REMOVED: AllFilesAccess log
+        Log.d(TAG, "Sent status broadcast. State: $currentOperationalState, Running: ${server?.isAlive}, Dir: $directoryNameForBroadcast, Approval Req: $requireApprovalEnabled, HTTPS: $useHttps")
 
         updateNotification()
-         return Unit
+         return
     }
 
 
-    private fun startServerLogic(uriToShare: Uri): Unit { // Renamed from startServer
+    private fun startServerLogic(uriToShare: Uri) {
         if (server != null && server!!.isAlive) {
             Log.d(TAG, "startServerLogic: Server is already running.")
             currentOperationalState = "Running"
@@ -468,7 +444,6 @@ class WebServerService : Service(), ConnectionApprovalListener {
             currentIpAddress = getWifiIPAddress(applicationContext)
              Log.d(TAG, "Service: Current Wi-Fi IP address: $currentIpAddress")
 
-            // MODIFIED: Root DocumentFile resolution to ONLY use fromTreeUri (SAF-only)
             val rootDoc: DocumentFile? = DocumentFile.fromTreeUri(applicationContext, uriToShare)
 
             if (rootDoc == null || !rootDoc.exists() || !rootDoc.isDirectory) {
@@ -532,8 +507,8 @@ class WebServerService : Service(), ConnectionApprovalListener {
         }
     }
 
-    // MODIFIED: Added keepForeground parameter
-    private fun stopServerInternal(keepForeground: Boolean = false): Unit {
+    // Added keepForeground parameter
+    private fun stopServerInternal(keepForeground: Boolean = false) {
         if (server == null) {
              Log.d(TAG, "stopServerInternal(Service): Server instance is null. Already stopped.")
              currentOperationalState = "Stopped"
@@ -592,7 +567,6 @@ class WebServerService : Service(), ConnectionApprovalListener {
         }
     }
 
-     @Suppress("DEPRECATION")
      private fun getWifiIPAddress(context: Context): String? {
          try {
              val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager?
@@ -603,36 +577,24 @@ class WebServerService : Service(), ConnectionApprovalListener {
                   return null
              }
 
-             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                 val activeNetwork = connectivityManager.activeNetwork
-                 val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+             val activeNetwork = connectivityManager.activeNetwork
+             val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
 
-                 if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                     val linkProperties = connectivityManager.getLinkProperties(activeNetwork)
-                     val ipAddresses = linkProperties?.linkAddresses?.map { it.address }?.filterNotNull()
-                     Log.d(TAG, "Service: Found IP addresses from LinkProperties: $ipAddresses")
+             if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                 val linkProperties = connectivityManager.getLinkProperties(activeNetwork)
+                 val ipAddresses = linkProperties?.linkAddresses?.map { it.address }?.filterNotNull()
+                 Log.d(TAG, "Service: Found IP addresses from LinkProperties: $ipAddresses")
 
-                     val ipv4 = ipAddresses?.firstOrNull { it is InetAddress && it.hostAddress?.contains(".") == true && !it.isLoopbackAddress && !it.isLinkLocalAddress }?.hostAddress
-                      if (ipv4 != null) {
-                          Log.d(TAG, "Service: Found IPv4 (modern): $ipv4")
-                         return ipv4
-                      }
+                 val ipv4 = ipAddresses?.firstOrNull { true && it.hostAddress?.contains(".") == true && !it.isLoopbackAddress && !it.isLinkLocalAddress }?.hostAddress
+                  if (ipv4 != null) {
+                      Log.d(TAG, "Service: Found IPv4 (modern): $ipv4")
+                     return ipv4
+                  }
 
-                     return ipAddresses?.firstOrNull { it is InetAddress && !it.isLoopbackAddress && !it.isLinkLocalAddress }?.hostAddress
+                 return ipAddresses?.firstOrNull { true && !it.isLoopbackAddress && !it.isLinkLocalAddress }?.hostAddress
 
-                 } else {
-                     Log.d(TAG, "Service: getWifiIPAddress: Not connected to Wi-Fi (NetworkCapabilities check).")
-                     return null
-                 }
              } else {
-                 val wifiInfo = wifiManager.connectionInfo
-                 val ipAddressInt = wifiInfo?.ipAddress ?: 0
-                 if (ipAddressInt != 0 && ipAddressInt != -1) {
-                     val ipAddress = Formatter.formatIpAddress(ipAddressInt)
-                      Log.d(TAG, "Service: getWifiIPAddress: Found IPv4 (deprecated): $ipAddress")
-                      if (ipAddress != "0.0.0.0") return ipAddress
-                 }
-                 Log.d(TAG, "Service: getWifiIPAddress: Not connected to Wi-Fi (deprecated check).")
+                 Log.d(TAG, "Service: getWifiIPAddress: Not connected to Wi-Fi (NetworkCapabilities check).")
                  return null
              }
 
@@ -691,16 +653,4 @@ class WebServerService : Service(), ConnectionApprovalListener {
         useHttps = prefs.getBoolean(PREF_USE_HTTPS, false)
         Log.d(TAG, "Service loaded preferences: requireApprovalEnabled = $requireApprovalEnabled, useHttps = $useHttps")
     }
-
-    // REMOVED: updateManageAllFilesAccessStatus() function
-    /*
-    private fun updateManageAllFilesAccessStatus() {
-        hasManageAllFilesAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            false
-        }
-        Log.d(TAG, "Service updated hasManageAllFilesAccess: $hasManageAllFilesAccess")
-    }
-    */
 }
