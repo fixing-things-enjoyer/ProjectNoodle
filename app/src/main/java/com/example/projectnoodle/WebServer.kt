@@ -35,25 +35,25 @@ class WebServer(
     private val applicationContext: Context, // Keep context reference
     private val sharedDirectoryUri: Uri, // Keep URI reference
     private val serverIpAddress: String?, // Keep IP reference
-    private val requireApprovalEnabled: Boolean,
-    private val approvalListener: ConnectionApprovalListener? // NEW: Listener for approval requests
-
+    private val requireApprovalEnabled: Boolean, // Approval setting
+    private val approvalListener: ConnectionApprovalListener? // Listener for approval requests
 ) : NanoHTTPD(port) {
 
-    private val rootDocumentFile = DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
+    // FIX: Added the approvedClients member variable
+    private val approvedClients = mutableSetOf<String>()
 
-    private val approvedClients = mutableSetOf<String>() // Store client identifiers (e.g., IP addresses)
+    // MODIFIED: rootDocumentFile initialization to use DocumentFile.fromTreeUri exclusively
+    private val rootDocumentFile: DocumentFile? = DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
 
     init {
         Log.d(TAG, "WebServer: Initialized with port $port and shared directory URI ${sharedDirectoryUri.toString()}")
         Log.d(TAG, "WebServer: Connection approval required: $requireApprovalEnabled")
 
-
         if (rootDocumentFile == null || !rootDocumentFile.exists() || !rootDocumentFile.isDirectory) {
             Log.e(TAG, "WebServer: Invalid or inaccessible root DocumentFile for URI: ${sharedDirectoryUri.toString()}")
             // The Service checks this before creating the WebServer instance now.
         } else {
-            Log.d(TAG, "WebServer: Root DocumentFile resolved: ${rootDocumentFile.name}")
+            Log.d(TAG, "WebServer: Root DocumentFile resolved: ${rootDocumentFile.name} (URI: ${rootDocumentFile.uri})")
         }
     }
 
@@ -79,6 +79,7 @@ class WebServer(
         for (segment in segments) {
              val decodedSegment = try { URLDecoder.decode(segment, StandardCharsets.UTF_8.name()) } catch (e: Exception) { segment }
 
+            // DocumentFile.findFile() works for content:// backed DocumentFile instances.
             val foundChild = currentDocument?.findFile(decodedSegment)
             if (foundChild == null) {
                 Log.w(TAG, "findDocumentFile: Could not find segment '$decodedSegment' (original segment: '$segment') in ${currentDocument?.name ?: "current directory"} (URI: ${currentDocument?.uri}). Path not found.")
@@ -106,8 +107,8 @@ class WebServer(
             } else {
                 Log.d(TAG, "WebServer: Client $clientIp is NOT approved. Returning unauthorized response and informing listener.")
                 // Client is NOT approved, inform the listener and return the specific unauthorized response
-                approvalListener?.onNewClientConnectionAttempt(clientIp) // NEW: Call listener
-                return handleUnauthorizedClientResponse(session) // NEW: Delegate to new function
+                approvalListener?.onNewClientConnectionAttempt(clientIp)
+                return handleUnauthorizedClientResponse(session)
             }
         }
 
@@ -209,11 +210,10 @@ class WebServer(
                  }
             }
 
-            // MODIFIED: This block handles serving index.html and other bundled assets
             (requestUrlPathClean == "/" ||
              requestUrlPathClean.startsWith("/assets/") ||
              requestUrlPathClean == "/project_noodle.png" ||
-             requestUrlPathClean == "/index.css") // Add any other top-level assets here
+             requestUrlPathClean == "/index.css")
              && method == Method.GET -> {
 
                 val assetPath = when {
@@ -228,31 +228,25 @@ class WebServer(
                         val reader = indexHtmlStream.bufferedReader()
                         val indexHtmlContent = reader.use { it.readText() }
 
-                        // Dynamically determine the base URL for API calls
-                        // Use the IP address and listening port that this server instance is using
                         val serverBaseUrl = if (serverIpAddress != null) "http://$serverIpAddress:$listeningPort" else null
                         val headEndTag = "</head>"
-                        // Inject the global JavaScript variable for the frontend
                         val scriptToInject = serverBaseUrl?.let { url ->
                             "<script>\n" +
                             "  window.__API_BASE_URL__ = \"$url\";\n" +
                             "  console.log('Injected API Base URL:', window.__API_BASE_URL__);\n" +
                             "</script>\n"
-                        } ?: "" // If IP is null (e.g., no Wi-Fi), inject an empty script or nothing
+                        } ?: ""
 
                         val modifiedHtmlContent = if (indexHtmlContent.contains(headEndTag)) {
-                            // Inject before </head>
                             indexHtmlContent.replace(headEndTag, scriptToInject + headEndTag)
                         } else {
-                            // Fallback: if </head> not found, inject at the start of <body>
                             Log.w(TAG, "WebServer: </head> not found in index.html, injecting script at start of body.")
-                            indexHtmlContent.replace("<body>", "<body>\n$scriptToInject") // Assuming <body> exists
+                            indexHtmlContent.replace("<body>", "<body>\n$scriptToInject")
                         }
                          val mimeType = "text/html"
                          newFixedLengthResponse(Status.OK, mimeType, modifiedHtmlContent)
 
                     } else {
-                        // Serve other assets directly (CSS, JS bundles, images, etc.)
                         val assetStream: InputStream = applicationContext.assets.open(assetPath)
                         val mimeType = guessMimeTypeFromExtension(assetPath) ?: MIME_OCTET_STREAM
                         newChunkedResponse(Status.OK, mimeType, assetStream)
@@ -278,17 +272,14 @@ class WebServer(
         return response
     }
 
-     // MODIFIED: Renamed from handleUnauthorizedClient and removed WWW-Authenticate header
      private fun handleUnauthorizedClientResponse(session: IHTTPSession): Response {
          val uri = session.uri
          val requestUrlPath = uri.split('?')[0]
          val requestUrlPathClean = "/" + requestUrlPath.trim('/').replace(Regex("/+"), "/")
 
          val response: Response = if (requestUrlPathClean.startsWith("/api/")) {
-             // Return JSON error for API requests
              newJsonResponse(Status.UNAUTHORIZED, mapOf("status" to "error", "message" to "Authorization required. Please approve the connection on the device then refresh."))
          } else {
-             // Return HTML message for other requests
              newFixedLengthResponse(Status.UNAUTHORIZED, "text/html",
                  "<!DOCTYPE html>\n" +
                  "<html>\n" +
@@ -315,8 +306,7 @@ class WebServer(
              )
          }
 
-         // REMOVED: response.addHeader("WWW-Authenticate", "Basic realm=\"Project Noodle Approval\"")
-         response.addHeader("Access-Control-Allow-Origin", "*") // Still allow CORS for the error response
+         response.addHeader("Access-Control-Allow-Origin", "*")
          return response
      }
 
@@ -587,7 +577,7 @@ class WebServer(
         if (tempFilePath.isNullOrEmpty()) {
              Log.w(TAG, "handleUploadJson: Temporary file path is null or empty from 'files' map for key: $uploadedFileKey")
              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-             return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Internal error processing temp file path from 'files' map."))
+             return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Internal error processing temp file path from 'files' map."))
         }
 
         val originalFileNameList = session.parameters[uploadedFileKey]
@@ -596,7 +586,7 @@ class WebServer(
         if (originalFileNameCandidate.isNullOrEmpty()) {
              Log.w(TAG, "handleUploadJson: Original filename candidate is null or empty from session parameters for key: $uploadedFileKey.")
               files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Error 400: Original filename is empty or missing from session parameters."))
+             return newJsonResponse(Status.BAD_REQUEST, mapOf("status" to "error", "message" to "Original filename is empty or missing from session parameters."))
         }
 
         val controlCharsAndQuotesRegex = Regex("[\\x00-\\x1F\\x7F\"]")
@@ -638,7 +628,7 @@ class WebServer(
             if (newDocumentFile == null) {
                 Log.e(TAG, "handleUploadJson: Failed to create new document file '$decodedOriginalFileName' in ${parentDirectory.name}. createFile returned null.")
                  files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-                 return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Failed to create file on device storage. A file with this name might already exist or permissions are insufficient."))
+                 return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Failed to create file on device storage. A file with this name might already exist or permissions are insufficient."))
             }
 
             val outputStream = applicationContext.contentResolver.openOutputStream(newDocumentFile.uri)
@@ -647,7 +637,7 @@ class WebServer(
                  Log.e(TAG, "handleUploadJson: Failed to open output stream for new document file ${newDocumentFile.uri}. openOutputStream returned null.")
                  try { newDocumentFile?.delete() } catch (e: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e) }
                  files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-                 return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Failed to open stream for writing to device storage."))
+                 return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Failed to open stream for writing to device storage."))
             }
 
             val tempFileInputStream = FileInputStream(tempFilePath)
@@ -682,22 +672,22 @@ class WebServer(
              Log.e(TAG, "handleUploadJson: Security exception creating or writing file '$decodedOriginalFileName' in ${parentDirectory.uri}", e)
               try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
               files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-             return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Error 403: Permission denied to write to this location."))
+             return newJsonResponse(Status.FORBIDDEN, mapOf("status" to "error", "message" to "Permission denied to write to this location."))
         } catch (e: FileNotFoundException) {
              Log.e(TAG, "handleUploadJson: File not found (temp file?) or output stream failed: '$decodedOriginalFileName'", e)
               try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
               files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-             return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: File processing error during upload (temp file missing or output stream failed)."))
+             return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "File processing error during upload (temp file missing or output stream failed)."))
         } catch (e: IOException) {
             Log.e(TAG, "handleUploadJson: IO error during file copy for '$decodedOriginalFileName'", e)
              try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: IO Error during file upload."))
+            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "IO Error during file upload."))
         } catch (e: Exception) {
             Log.e(TAG, "handleUploadJson: Unexpected error processing upload for '$decodedOriginalFileName'", e)
              try { newDocumentFile?.delete() } catch (e2: Exception) { Log.e(TAG, "handleUploadJson: Failed to delete incomplete file ${newDocumentFile?.uri}", e2) }
              files.values.forEach { tempPath -> try { File(tempPath).delete() } catch (_: Exception) {} }
-            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Error 500: Unexpected server error during upload: ${e.message}"))
+            return newJsonResponse(Status.INTERNAL_ERROR, mapOf("status" to "error", "message" to "Unexpected server error during upload: ${e.message}"))
         }
     }
 
