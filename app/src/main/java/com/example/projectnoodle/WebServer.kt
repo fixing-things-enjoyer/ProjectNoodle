@@ -38,36 +38,21 @@ open class WebServer(
     private val sharedDirectoryUri: Uri, // Keep URI reference
     private val serverIpAddress: String?, // Keep IP reference
     private val requireApprovalEnabled: Boolean,
-    private val approvalListener: ConnectionApprovalListener?, // Listener for approval requests
-    // MODIFIED: Added hasManageAllFilesAccess to constructor, changed to 'protected'
-    protected val hasManageAllFilesAccess: Boolean // NEW: Add this to constructor (using protected for subclasses)
+    private val approvalListener: ConnectionApprovalListener? // Listener for approval requests
+    // REMOVED: protected val hasManageAllFilesAccess: Boolean // NEW: Add this to constructor (using protected for subclasses)
 ) : NanoHTTPD(port) {
 
     // FIX: Added the approvedClients member variable
     private val approvedClients = mutableSetOf<String>()
 
-    // MODIFIED: rootDocumentFile initialization to use DocumentFile.fromTreeUri or fromFile based on scheme
-    private val rootDocumentFile: DocumentFile? = if (sharedDirectoryUri.scheme == "file" && sharedDirectoryUri.path != null && hasManageAllFilesAccess) {
-        try {
-            val file = File(sharedDirectoryUri.path!!)
-            if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
-        } catch (e: Exception) {
-            Log.e(TAG, "WebServer: Error creating DocumentFile.fromFile for URI ${sharedDirectoryUri.toString()}", e)
-            null
-        }
-    } else if (sharedDirectoryUri.scheme == "content") {
-        DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
-    } else {
-        // Fallback for other unexpected schemes or if hasManageAllFilesAccess is false for a file:// URI
-        Log.w(TAG, "WebServer: Unexpected URI scheme or permissions for sharedDirectoryUri: ${sharedDirectoryUri.toString()}")
-        null
-    }
+    // MODIFIED: rootDocumentFile initialization to ONLY use DocumentFile.fromTreeUri (SAF-only)
+    private val rootDocumentFile: DocumentFile? = DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
 
 
     init {
         Log.d(TAG, "WebServer: Initialized with port $port and shared directory URI ${sharedDirectoryUri.toString()}")
         Log.d(TAG, "WebServer: Connection approval required: $requireApprovalEnabled")
-        Log.d(TAG, "WebServer: Has All Files Access (passed): $hasManageAllFilesAccess")
+        // REMOVED: Log.d(TAG, "WebServer: Has All Files Access (passed): $hasManageAllFilesAccess")
 
 
         if (rootDocumentFile == null || !rootDocumentFile.exists() || !rootDocumentFile.isDirectory) {
@@ -100,7 +85,7 @@ open class WebServer(
         for (segment in segments) {
              val decodedSegment = try { URLDecoder.decode(segment, StandardCharsets.UTF_8.name()) } catch (e: Exception) { segment }
 
-            // DocumentFile.findFile() works for both content:// and file:// backed DocumentFile instances.
+            // DocumentFile.findFile() works for content:// backed DocumentFile instances.
             val foundChild = currentDocument?.findFile(decodedSegment)
             if (foundChild == null) {
                 Log.w(TAG, "findDocumentFile: Could not find segment '$decodedSegment' (original segment: '$segment') in ${currentDocument?.name ?: "current directory"} (URI: ${currentDocument?.uri}). Path not found.")

@@ -40,16 +40,14 @@ class HttpsWebServer(
     sharedDirectoryUri: Uri,
     serverIpAddress: String?,
     requireApprovalEnabled: Boolean,
-    approvalListener: ConnectionApprovalListener?,
-    hasManageAllFilesAccess: Boolean
+    approvalListener: ConnectionApprovalListener?
 ) : WebServer(
     port,
     applicationContext,
     sharedDirectoryUri,
     serverIpAddress,
     requireApprovalEnabled,
-    approvalListener,
-    hasManageAllFilesAccess
+    approvalListener
 ) {
 
     // Bouncy Castle provider registration is done in MainActivity.onCreate()

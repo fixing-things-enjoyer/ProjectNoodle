@@ -45,7 +45,7 @@ const val ACTION_QUERY_STATUS = "com.example.projectnoodle.QUERY_STATUS"
 
 const val EXTRA_SHARED_DIRECTORY_URI = "com.example.projectnoodle.SHARED_DIRECTORY_URI"
 const val EXTRA_REQUIRE_APPROVAL = "com.example.projectnoodle.REQUIRE_APPROVAL"
-const val EXTRA_HAS_ALL_FILES_ACCESS = "com.example.projectnoodle.HAS_ALL_FILES_ACCESS"
+// REMOVED: const val EXTRA_HAS_ALL_FILES_ACCESS = "com.example.projectnoodle.HAS_ALL_FILES_ACCESS"
 const val EXTRA_USE_HTTPS = "com.example.projectnoodle.USE_HTTPS"
 
 const val EXTRA_SERVER_IS_RUNNING = "com.example.projectnoodle.IS_RUNNING"
@@ -68,7 +68,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
     private var currentOperationalState: String = "Stopped"
     private var requireApprovalEnabled: Boolean = false
     private var useHttps: Boolean = false
-    private var hasManageAllFilesAccess: Boolean = false
+    // REMOVED: private var hasManageAllFilesAccess: Boolean = false
 
     private var isForegroundServiceStarted = false // NEW: Track if startForeground has been successfully called
 
@@ -85,7 +85,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
         createNotificationChannel()
         createApprovalNotificationChannel()
         loadPreferences()
-        updateManageAllFilesAccessStatus()
+        // REMOVED: updateManageAllFilesAccessStatus()
         // Do not call sendStatusUpdate() here, wait for onStartCommand
     }
 
@@ -116,16 +116,16 @@ class WebServerService : Service(), ConnectionApprovalListener {
                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
                 }
                 val newRequireApprovalEnabled = intent.getBooleanExtra(EXTRA_REQUIRE_APPROVAL, false)
-                val newHasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, false)
+                // REMOVED: val newHasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, false)
                 val newUseHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, false)
-                Log.d(TAG, "Processing START_SERVER. requireApproval=$newRequireApprovalEnabled, hasAllFilesAccess=$newHasManageAllFilesAccess, useHttps=$newUseHttps")
+                Log.d(TAG, "Processing START_SERVER. requireApproval=$newRequireApprovalEnabled, useHttps=$newUseHttps") // REMOVED: hasAllFilesAccess log
 
                 this.requireApprovalEnabled = newRequireApprovalEnabled
-                this.hasManageAllFilesAccess = newHasManageAllFilesAccess
+                // REMOVED: this.hasManageAllFilesAccess = newHasManageAllFilesAccess
                 this.useHttps = newUseHttps
 
                 if (uriToShare != null) {
-                    if (server != null && server!!.isAlive && uriToShare == currentSharedDirectoryUri && newRequireApprovalEnabled == requireApprovalEnabled && newHasManageAllFilesAccess == hasManageAllFilesAccess && newUseHttps == useHttps) {
+                    if (server != null && server!!.isAlive && uriToShare == currentSharedDirectoryUri && newRequireApprovalEnabled == requireApprovalEnabled && newUseHttps == useHttps) { // REMOVED: hasManageAllFilesAccess from check
                         Log.d(TAG, "Server already running with the same config.")
                         currentOperationalState = "Running" // Ensure correct state
                         sendStatusUpdate() // Just update UI and notification content
@@ -159,7 +159,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
                 } else {
                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
                 }
-                this.hasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, this.hasManageAllFilesAccess)
+                // REMOVED: this.hasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, this.hasManageAllFilesAccess)
                 this.useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, this.useHttps)
                 if (uriFromQuery != null) this.currentSharedDirectoryUri = uriFromQuery
 
@@ -349,17 +349,17 @@ class WebServerService : Service(), ConnectionApprovalListener {
 
      private fun getServerStatusText(isRunning: Boolean): String {
           val directoryName = currentSharedDirectoryUri?.let { uri ->
+              // REMOVED: hasManageAllFilesAccess check here as it's no longer relevant
+              /*
               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasManageAllFilesAccess && uri.toString() == Environment.getExternalStorageDirectory().toURI().toString()) {
                   return@let "Internal Storage (All Files Access)"
               }
+              */
               try {
                   val documentFile = if (uri.scheme == "content") {
                       DocumentFile.fromTreeUri(applicationContext, uri)
-                  } else if (uri.scheme == "file" && uri.path != null) {
-                      val file = File(uri.path!!)
-                      if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
                   } else {
-                      null
+                      null // Only content:// URIs are expected now
                   }
                   documentFile?.name ?: uri.lastPathSegment?.let {
                        try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it } // Specify UTF-8
@@ -405,17 +405,17 @@ class WebServerService : Service(), ConnectionApprovalListener {
 
     private fun sendStatusUpdate(): Unit {
         val directoryNameForBroadcast = currentSharedDirectoryUri?.let { uri ->
+             // REMOVED: hasManageAllFilesAccess check here as it's no longer relevant
+             /*
              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasManageAllFilesAccess && uri.toString() == Environment.getExternalStorageDirectory().toURI().toString()) {
                  return@let "Internal Storage (All Files Access)"
              }
+             */
              try {
                  val documentFile = if (uri.scheme == "content") {
                      DocumentFile.fromTreeUri(applicationContext, uri)
-                 } else if (uri.scheme == "file" && uri.path != null) {
-                     val file = File(uri.path!!)
-                     if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
                  } else {
-                     null
+                     null // Only content:// URIs are expected now
                  }
                  documentFile?.name ?: uri.lastPathSegment?.let {
                       try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
@@ -439,7 +439,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
             putExtra(EXTRA_USE_HTTPS, useHttps)
         }
         localBroadcastManager.sendBroadcast(statusIntent)
-        Log.d(TAG, "Sent status broadcast. State: $currentOperationalState, Running: ${server?.isAlive}, Dir: $directoryNameForBroadcast, Approval Req: $requireApprovalEnabled, AllFilesAccess: $hasManageAllFilesAccess, HTTPS: $useHttps")
+        Log.d(TAG, "Sent status broadcast. State: $currentOperationalState, Running: ${server?.isAlive}, Dir: $directoryNameForBroadcast, Approval Req: $requireApprovalEnabled, HTTPS: $useHttps") // REMOVED: AllFilesAccess log
 
         updateNotification()
          return Unit
@@ -468,20 +468,8 @@ class WebServerService : Service(), ConnectionApprovalListener {
             currentIpAddress = getWifiIPAddress(applicationContext)
              Log.d(TAG, "Service: Current Wi-Fi IP address: $currentIpAddress")
 
-            val rootDoc: DocumentFile? = if (uriToShare.scheme == "content") {
-                DocumentFile.fromTreeUri(applicationContext, uriToShare)
-            } else if (uriToShare.scheme == "file" && uriToShare.path != null) {
-                try {
-                    val file = File(uriToShare.path!!)
-                    if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
-                } catch (e: Exception) {
-                    Log.e(TAG, "Service: Error creating DocumentFile.fromFile for URI ${uriToShare.toString()}", e)
-                    null
-                }
-            } else {
-                Log.w(TAG, "Service: Unexpected URI scheme for sharedDirectoryUri: ${uriToShare.toString()}")
-                null
-            }
+            // MODIFIED: Root DocumentFile resolution to ONLY use fromTreeUri (SAF-only)
+            val rootDoc: DocumentFile? = DocumentFile.fromTreeUri(applicationContext, uriToShare)
 
             if (rootDoc == null || !rootDoc.exists() || !rootDoc.isDirectory) {
                  Log.e(TAG, "Service: Invalid root DocumentFile for URI: $uriToShare. Cannot start.")
@@ -498,13 +486,13 @@ class WebServerService : Service(), ConnectionApprovalListener {
                     Log.d(TAG, "Service: Instantiating HttpsWebServer.")
                     HttpsWebServer(
                         dynamicPort, applicationContext, uriToShare, currentIpAddress,
-                        requireApprovalEnabled, this, hasManageAllFilesAccess
+                        requireApprovalEnabled, this
                     )
                 } else {
                     Log.d(TAG, "Service: Instantiating WebServer (HTTP).")
                     WebServer(
                         dynamicPort, applicationContext, uriToShare, currentIpAddress,
-                        requireApprovalEnabled, this, hasManageAllFilesAccess
+                        requireApprovalEnabled, this
                     )
                 }
 
@@ -704,6 +692,8 @@ class WebServerService : Service(), ConnectionApprovalListener {
         Log.d(TAG, "Service loaded preferences: requireApprovalEnabled = $requireApprovalEnabled, useHttps = $useHttps")
     }
 
+    // REMOVED: updateManageAllFilesAccessStatus() function
+    /*
     private fun updateManageAllFilesAccessStatus() {
         hasManageAllFilesAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -712,4 +702,5 @@ class WebServerService : Service(), ConnectionApprovalListener {
         }
         Log.d(TAG, "Service updated hasManageAllFilesAccess: $hasManageAllFilesAccess")
     }
+    */
 }

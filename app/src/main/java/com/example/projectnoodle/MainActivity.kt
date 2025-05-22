@@ -45,7 +45,6 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.example.projectnoodle.ui.theme.ProjectNoodleTheme
 import android.content.pm.PackageManager
 import android.Manifest
-import android.provider.Settings
 import android.os.Environment
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
@@ -70,7 +69,7 @@ class MainActivity : ComponentActivity() {
 
     private var requireApprovalEnabled by mutableStateOf(false)
     private var useHttps by mutableStateOf(false) // NEW: HTTPS toggle state
-    private var hasManageAllFilesAccess by mutableStateOf(false)
+    // REMOVED: private var hasManageAllFilesAccess by mutableStateOf(false)
     private var showCommonDirectoryPicker by mutableStateOf(false)
 
 
@@ -78,10 +77,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var localBroadcastManager: LocalBroadcastManager
     private lateinit var requestNotificationPermissionLauncher: ActivityResultLauncher<String>
     private lateinit var serverStatusReceiver: BroadcastReceiver
-    private lateinit var requestManageAllFilesAccessLauncher: ActivityResultLauncher<Intent>
+    // REMOVED: private lateinit var requestManageAllFilesAccessLauncher: ActivityResultLauncher<Intent>
 
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(saved: Bundle?) {
         // NEW: Add Bouncy Castle provider at the highest priority as early as possible
         // This is done BEFORE super.onCreate() to ensure it's available for all security API calls.
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
@@ -91,7 +90,7 @@ class MainActivity : ComponentActivity() {
             Log.d(TAG, "Bouncy Castle security provider already present in MainActivity.onCreate.")
         }
 
-        super.onCreate(savedInstanceState)
+        super.onCreate(saved)
         Log.d(TAG, "MainActivity onCreate")
 
         localBroadcastManager = LocalBroadcastManager.getInstance(this)
@@ -109,13 +108,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        requestManageAllFilesAccessLauncher = registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) {
-            Log.d(TAG, "Returned from MANAGE_EXTERNAL_STORAGE settings screen.")
-            updateManageAllFilesAccessStatus()
-        }
-
+        // REMOVED: requestManageAllFilesAccessLauncher registration
 
         openDirectoryPickerLauncher = registerForActivityResult(
             ActivityResultContracts.OpenDocumentTree()
@@ -124,7 +117,7 @@ class MainActivity : ComponentActivity() {
         }
 
         loadPreferences() // Load all preferences including the new HTTPS toggle
-        updateManageAllFilesAccessStatus()
+        // REMOVED: updateManageAllFilesAccessStatus()
 
 
         serverPort = -1
@@ -144,12 +137,12 @@ class MainActivity : ComponentActivity() {
                         sharedDirectoryName = sharedDirectoryNameDisplay,
                         requireApprovalEnabled = requireApprovalEnabled,
                         useHttps = useHttps, // NEW: Pass HTTPS state
-                        hasManageAllFilesAccess = hasManageAllFilesAccess,
+                        // REMOVED: hasManageAllFilesAccess = hasManageAllFilesAccess,
                         onStartClick = { startServer() },
                         onStopClick = { stopServer() },
                         onSelectSpecificFolderClick = { launchDirectoryPicker() },
-                        onSelectCommonFolderClick = { showCommonDirectoryPicker = true },
-                        onRequestManageAllFilesAccessClick = { requestManageAllFilesAccess() },
+                        // REMOVED: onSelectCommonFolderClick = { showCommonDirectoryPicker = true },
+                        // REMOVED: onRequestManageAllFilesAccessClick = { requestManageAllFilesAccess() },
                         onApprovalToggleChange = { enabled ->
                             requireApprovalEnabled = enabled
                             savePreferences(enabled, useHttps, sharedDirectoryUri) // NEW: Save HTTPS state
@@ -174,6 +167,8 @@ class MainActivity : ComponentActivity() {
                         }
                     )
 
+                    // REMOVED: CommonDirectoryPicker usage
+                    /*
                     if (showCommonDirectoryPicker) {
                         CommonDirectoryPicker(
                             onDirectorySelected = { file ->
@@ -183,10 +178,11 @@ class MainActivity : ComponentActivity() {
                             onDismiss = { showCommonDirectoryPicker = false }
                         )
                     }
+                    */
                 }
             }
         }
-        Log.d(TAG, "MainActivity onCreate finished. Loaded URI: $sharedDirectoryUri, Approval: $requireApprovalEnabled, HTTPS: $useHttps, AllFilesAccess: $hasManageAllFilesAccess")
+        Log.d(TAG, "MainActivity onCreate finished. Loaded URI: $sharedDirectoryUri, Approval: $requireApprovalEnabled, HTTPS: $useHttps") // REMOVED: AllFilesAccess
     }
 
     override fun onStart() {
@@ -194,18 +190,18 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "MainActivity onStart - Registering receiver")
         val filter = IntentFilter(ACTION_SERVER_STATUS_UPDATE)
         localBroadcastManager.registerReceiver(serverStatusReceiver, filter)
-        updateManageAllFilesAccessStatus()
+        // REMOVED: updateManageAllFilesAccessStatus()
     }
 
      override fun onResume() {
          super.onResume()
           Log.d(TAG, "MainActivity onResume - Sending status query to service.")
-          updateManageAllFilesAccessStatus()
+          // REMOVED: updateManageAllFilesAccessStatus()
 
           val queryIntent = Intent(this, WebServerService::class.java).apply {
                action = ACTION_QUERY_STATUS
                putExtra(EXTRA_SHARED_DIRECTORY_URI, sharedDirectoryUri)
-               putExtra(EXTRA_HAS_ALL_FILES_ACCESS, hasManageAllFilesAccess)
+               // REMOVED: putExtra(EXTRA_HAS_ALL_FILES_ACCESS, hasManageAllFilesAccess)
                putExtra(EXTRA_USE_HTTPS, useHttps) // NEW: Pass HTTPS state on query
           }
           startService(queryIntent)
@@ -260,19 +256,13 @@ class MainActivity : ComponentActivity() {
 
      private fun updateSharedDirectoryDisplayName() {
          val derivedName = sharedDirectoryUri?.let { uri ->
-             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasManageAllFilesAccess && uri.toString() == Environment.getExternalStorageDirectory().toURI().toString()) {
-                 return@let "Internal Storage (All Files Access)"
-             }
+             // REMOVED: Specific "Internal Storage (All Files Access)" path handling
              try {
-                 // REVERTED from DocumentFile.fromUri, manually check scheme
+                 // ONLY handle content:// URIs, as SAF is the only mechanism now
                  val documentFile = if (uri.scheme == "content") {
                      DocumentFile.fromTreeUri(applicationContext, uri)
-                 } else if (uri.scheme == "file" && uri.path != null) {
-                     // Handle file:// URIs using fromFile if path is valid
-                     val file = File(uri.path!!)
-                     if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
                  } else {
-                     null
+                     null // Only content:// URIs are expected now
                  }
 
                  documentFile?.name ?: uri.lastPathSegment?.let {
@@ -322,6 +312,8 @@ class MainActivity : ComponentActivity() {
 
 
     private fun startServer() {
+         // REMOVED: MANAGE_EXTERNAL_STORAGE permission check before starting server
+         /*
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
              if (sharedDirectoryUri == null) {
                  Log.w(TAG, "startServer (Activity): MANAGE_EXTERNAL_STORAGE not granted, and no SAF directory selected. Prompting user to select directory or grant permission.")
@@ -331,6 +323,7 @@ class MainActivity : ComponentActivity() {
                  return
              }
          }
+         */
 
          if (sharedDirectoryUri == null) {
              Log.w(TAG, "startServer (Activity): Cannot start server, no directory selected (after all checks).")
@@ -379,7 +372,7 @@ class MainActivity : ComponentActivity() {
             action = ACTION_START_SERVER
             putExtra(EXTRA_SHARED_DIRECTORY_URI, sharedDirectoryUri)
             putExtra(EXTRA_REQUIRE_APPROVAL, requireApprovalEnabled)
-            putExtra(EXTRA_HAS_ALL_FILES_ACCESS, hasManageAllFilesAccess)
+            // REMOVED: putExtra(EXTRA_HAS_ALL_FILES_ACCESS, hasManageAllFilesAccess)
             putExtra(EXTRA_USE_HTTPS, useHttps) // NEW: Pass HTTPS preference
         }
 
@@ -463,6 +456,7 @@ class MainActivity : ComponentActivity() {
 
 
         try {
+            // Since we are only using SAF, we expect content:// URIs
             if (uri.scheme == "content") {
                 try {
                      contentResolver.takePersistableUriPermission(uri, flags)
@@ -470,8 +464,9 @@ class MainActivity : ComponentActivity() {
                  } catch (e: SecurityException) {
                      Log.w(TAG, "Failed to take persistable URI permission for $uri. App might lose access after reboot.", e)
                  }
-            } else if (uri.scheme == "file") {
-                Log.d(TAG, "URI is a file:// URI. No persistable URI permission needed.")
+            } else {
+                Log.w(TAG, "Unsupported URI scheme for SAF: ${uri.scheme}. Expected 'content://'.")
+                throw IllegalArgumentException("Only content:// URIs are supported for SAF.")
             }
 
 
@@ -516,6 +511,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // REMOVED: updateManageAllFilesAccessStatus() function
+    /*
     private fun updateManageAllFilesAccessStatus() {
         hasManageAllFilesAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
@@ -535,8 +532,11 @@ class MainActivity : ComponentActivity() {
             sendStatusUpdateForUI("Stopped", networkStatusMessage)
         }
     }
+    */
 
 
+    // REMOVED: requestManageAllFilesAccess() function
+    /*
     private fun requestManageAllFilesAccess() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
@@ -555,8 +555,10 @@ class MainActivity : ComponentActivity() {
              sendStatusUpdateForUI(serverOperationalState, networkStatusMessage)
         }
     }
+    */
 
-    // FIX: Changed visibility from private to public
+    // REMOVED: getCommonPublicDirectories() function and CommonDirectoryPicker composable
+    /*
     @Composable
     fun getCommonPublicDirectories(): List<Pair<String, File>> {
         val context = LocalContext.current
@@ -591,6 +593,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun String.capitalizeWords(): String = split(" ").joinToString(" ") { it.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() } }
+    */
 }
 
 @Composable
@@ -601,12 +604,12 @@ fun ServerStatus(
     sharedDirectoryName: String,
     requireApprovalEnabled: Boolean,
     useHttps: Boolean, // NEW: HTTPS state
-    hasManageAllFilesAccess: Boolean,
+    // REMOVED: hasManageAllFilesAccess: Boolean,
     onStartClick: () -> Unit,
     onStopClick: () -> Unit,
     onSelectSpecificFolderClick: () -> Unit,
-    onSelectCommonFolderClick: () -> Unit,
-    onRequestManageAllFilesAccessClick: () -> Unit,
+    // REMOVED: onSelectCommonFolderClick: () -> Unit,
+    // REMOVED: onRequestManageAllFilesAccessClick: () -> Unit,
     onApprovalToggleChange: (Boolean) -> Unit,
     onHttpsToggleChange: (Boolean) -> Unit, // NEW: HTTPS toggle callback
     modifier: Modifier = Modifier
@@ -624,11 +627,14 @@ fun ServerStatus(
 
      val isApprovalToggleEnabled = operationalState == "Stopped" || operationalState.startsWith("Failed")
 
+    // REMOVED: manageAllFilesAccessStatusText
+    /*
     val manageAllFilesAccessStatusText = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         if (hasManageAllFilesAccess) "All Files Access: Granted" else "All Files Access: Not Granted"
     } else {
         "All Files Access: N/A (API < 30)"
     }
+    */
 
 
     Column(
@@ -689,6 +695,8 @@ fun ServerStatus(
 
         Spacer(Modifier.height(16.dp))
 
+        // REMOVED: Manage All Files Access status text and button
+        /*
         Text(
             text = manageAllFilesAccessStatusText,
             style = MaterialTheme.typography.bodySmall,
@@ -720,11 +728,13 @@ fun ServerStatus(
             )
             Spacer(Modifier.height(8.dp))
         }
+        */
+
         Button(
             onClick = onSelectSpecificFolderClick,
             enabled = isSelectDirectoryEnabled
         ) {
-            Text("Select Specific Folder (SAF Picker)")
+            Text("Select Directory (SAF Picker)")
         }
 
         Spacer(Modifier.height(16.dp))
@@ -787,6 +797,8 @@ fun ServerStatus(
     }
 }
 
+// REMOVED: CommonDirectoryPicker Composable
+/*
 @Composable
 fun CommonDirectoryPicker(
     onDirectorySelected: (File) -> Unit,
@@ -823,6 +835,7 @@ fun CommonDirectoryPicker(
         }
     )
 }
+*/
 
 @Preview(showBackground = true)
 @Composable
@@ -837,12 +850,12 @@ fun ServerStatusPreview() {
                     sharedDirectoryName = "My Shared Folder",
                     requireApprovalEnabled = false,
                     useHttps = false, // NEW: Preview values
-                    hasManageAllFilesAccess = true,
+                    // REMOVED: hasManageAllFilesAccess = true,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
@@ -853,12 +866,12 @@ fun ServerStatusPreview() {
                     sharedDirectoryName = "My Shared Folder",
                     requireApprovalEnabled = true,
                     useHttps = true, // NEW: Preview values
-                    hasManageAllFilesAccess = false,
+                    // REMOVED: hasManageAllFilesAccess = false,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
@@ -869,12 +882,12 @@ fun ServerStatusPreview() {
                     sharedDirectoryName = "Not Selected",
                     requireApprovalEnabled = false,
                     useHttps = false, // NEW: Preview values
-                    hasManageAllFilesAccess = false,
+                    // REMOVED: hasManageAllFilesAccess = false,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
@@ -885,12 +898,12 @@ fun ServerStatusPreview() {
                     sharedDirectoryName = "My Shared Folder",
                     requireApprovalEnabled = true,
                     useHttps = false, // NEW: Preview values
-                    hasManageAllFilesAccess = true,
+                    // REMOVED: hasManageAllFilesAccess = true,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
@@ -901,12 +914,12 @@ fun ServerStatusPreview() {
                     sharedDirectoryName = "My Shared Folder",
                     requireApprovalEnabled = true,
                     useHttps = true, // NEW: Preview values
-                    hasManageAllFilesAccess = true,
+                    // REMOVED: hasManageAllFilesAccess = true,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
@@ -917,12 +930,12 @@ fun ServerStatusPreview() {
                      sharedDirectoryName = "My Shared Folder",
                     requireApprovalEnabled = false,
                     useHttps = false, // NEW: Preview values
-                    hasManageAllFilesAccess = false,
+                    // REMOVED: hasManageAllFilesAccess = false,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
@@ -933,12 +946,12 @@ fun ServerStatusPreview() {
                     sharedDirectoryName = "My Shared Folder",
                     requireApprovalEnabled = true,
                     useHttps = true, // NEW: Preview values
-                    hasManageAllFilesAccess = true,
+                    // REMOVED: hasManageAllFilesAccess = true,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
@@ -949,12 +962,12 @@ fun ServerStatusPreview() {
                     sharedDirectoryName = "New Folder",
                     requireApprovalEnabled = false,
                     useHttps = false, // NEW: Preview values
-                    hasManageAllFilesAccess = true,
+                    // REMOVED: hasManageAllFilesAccess = true,
                     onStartClick = {},
                     onStopClick = {},
                     onSelectSpecificFolderClick = {},
-                    onSelectCommonFolderClick = {},
-                    onRequestManageAllFilesAccessClick = {},
+                    // REMOVED: onSelectCommonFolderClick = {},
+                    // REMOVED: onRequestManageAllFilesAccessClick = {},
                     onApprovalToggleChange = {},
                     onHttpsToggleChange = {}
                 )
