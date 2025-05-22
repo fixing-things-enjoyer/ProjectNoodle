@@ -100,4 +100,8 @@ dependencies {
     implementation(libs.androidx.localbroadcastmanager)
 
     implementation(libs.material)
+
+    // NEW: Bouncy Castle for certificate generation
+    implementation(libs.bouncy.castle.prov)
+    implementation(libs.bouncy.castle.pkix)
 }

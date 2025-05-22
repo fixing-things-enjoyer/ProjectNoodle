@@ -1,4 +1,3 @@
-// File: app/src/main/java/com/example/projectnoodle/WebServerService.kt
 package com.example.projectnoodle
 
 import android.app.NotificationChannel
@@ -23,7 +22,9 @@ import fi.iki.elonen.NanoHTTPD
 import java.io.IOException
 import java.net.ServerSocket
 import java.net.InetAddress
+import android.os.Environment
 import java.io.File // Required for DocumentFile.fromFile
+import java.net.URLDecoder
 
 private const val TAG = "ProjectNoodleService"
 private const val NOTIFICATION_CHANNEL_ID = "project_noodle_server_channel"
@@ -34,7 +35,7 @@ const val APPROVAL_CHANNEL_ID = "project_noodle_approval_channel"
 const val APPROVAL_NOTIFICATION_ID = 3
 const val ACTION_APPROVE_CLIENT = "com.example.projectnoodle.APPROVE_CLIENT"
 const val ACTION_REJECT_CLIENT = "com.example.projectnoodle.REJECT_CLIENT"
-const val EXTRA_CLIENT_IP_FOR_APPROVAL = "com.example.projectnoodle.CLIENT_IP_FOR_APPROVAL" // This is the correct constant name
+const val EXTRA_CLIENT_IP_FOR_APPROVAL = "com.example.projectnoodle.CLIENT_IP_FOR_APPROVAL"
 
 const val ACTION_START_SERVER = "com.example.projectnoodle.START_SERVER"
 const val ACTION_STOP_SERVER = "com.example.projectnoodle.STOP_SERVER"
@@ -44,6 +45,8 @@ const val ACTION_QUERY_STATUS = "com.example.projectnoodle.QUERY_STATUS"
 
 const val EXTRA_SHARED_DIRECTORY_URI = "com.example.projectnoodle.SHARED_DIRECTORY_URI"
 const val EXTRA_REQUIRE_APPROVAL = "com.example.projectnoodle.REQUIRE_APPROVAL"
+const val EXTRA_HAS_ALL_FILES_ACCESS = "com.example.projectnoodle.HAS_ALL_FILES_ACCESS"
+const val EXTRA_USE_HTTPS = "com.example.projectnoodle.USE_HTTPS"
 
 const val EXTRA_SERVER_IS_RUNNING = "com.example.projectnoodle.IS_RUNNING"
 const val EXTRA_SERVER_OPERATIONAL_STATE = "com.example.projectnoodle.OPERATIONAL_STATE"
@@ -52,18 +55,22 @@ const val EXTRA_SERVER_IP = "com.example.projectnoodle.SERVER_IP"
 const val EXTRA_SERVER_PORT = "com.example.projectnoodle.SERVER_PORT"
 const val EXTRA_SHARED_DIRECTORY_NAME = "com.example.projectnoodle.SHARED_DIRECTORY_NAME"
 
-const val PREF_REQUIRE_APPROVAL = "pref_require_approval"
+public const val PREF_REQUIRE_APPROVAL = "pref_require_approval"
+public const val PREF_USE_HTTPS = "pref_use_https"
 
 
 class WebServerService : Service(), ConnectionApprovalListener {
 
-    private var server: WebServer? = null
+    private var server: NanoHTTPD? = null
     private var currentSharedDirectoryUri: Uri? = null
     private var currentServerPort: Int = -1
     private var currentIpAddress: String? = null
     private var currentOperationalState: String = "Stopped"
     private var requireApprovalEnabled: Boolean = false
+    private var useHttps: Boolean = false
+    private var hasManageAllFilesAccess: Boolean = false
 
+    private var isForegroundServiceStarted = false // NEW: Track if startForeground has been successfully called
 
     private lateinit var localBroadcastManager: LocalBroadcastManager
 
@@ -77,112 +84,117 @@ class WebServerService : Service(), ConnectionApprovalListener {
         localBroadcastManager = LocalBroadcastManager.getInstance(this)
         createNotificationChannel()
         createApprovalNotificationChannel()
-        loadPreferences() // Still load preferences here
-        sendStatusUpdate()
+        loadPreferences()
+        updateManageAllFilesAccessStatus()
+        // Do not call sendStatusUpdate() here, wait for onStartCommand
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "WebServerService onStartCommand received intent action: ${intent?.action} (StartId: $startId)")
-        Log.d(TAG, "ACTION_STOP_SERVER constant value: $ACTION_STOP_SERVER")
 
         when (intent?.action) {
             ACTION_START_SERVER -> {
-                 @Suppress("DEPRECATION")
-                 val uriToShare: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI, Uri::class.java)
-                 } else {
-                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
-                 }
-                 val newRequireApprovalEnabled = intent.getBooleanExtra(EXTRA_REQUIRE_APPROVAL, false)
-                 Log.d(TAG, "Received START_SERVER action. requireApprovalEnabled = $newRequireApprovalEnabled")
+                currentOperationalState = "Starting" // Set initial state
+
+                // MODIFIED: Call startForeground immediately with a "Starting..." notification
+                // This must happen before any potentially long or blocking operations.
+                if (!isForegroundServiceStarted) {
+                    val startingNotification = buildNotification().build() // Build with "Starting..." state
+                    startForeground(NOTIFICATION_ID, startingNotification)
+                    isForegroundServiceStarted = true
+                    Log.d(TAG, "Called startForeground() immediately in START_SERVER action.")
+                } else {
+                    // If already in foreground, just update the notification content
+                    updateNotificationOnly()
+                }
+
+
+                @Suppress("DEPRECATION")
+                val uriToShare: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI, Uri::class.java)
+                } else {
+                    intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
+                }
+                val newRequireApprovalEnabled = intent.getBooleanExtra(EXTRA_REQUIRE_APPROVAL, false)
+                val newHasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, false)
+                val newUseHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, false)
+                Log.d(TAG, "Processing START_SERVER. requireApproval=$newRequireApprovalEnabled, hasAllFilesAccess=$newHasManageAllFilesAccess, useHttps=$newUseHttps")
+
                 this.requireApprovalEnabled = newRequireApprovalEnabled
+                this.hasManageAllFilesAccess = newHasManageAllFilesAccess
+                this.useHttps = newUseHttps
 
                 if (uriToShare != null) {
-                    Log.d(TAG, "Received START_SERVER action with URI: $uriToShare")
+                    if (server != null && server!!.isAlive && uriToShare == currentSharedDirectoryUri && newRequireApprovalEnabled == requireApprovalEnabled && newHasManageAllFilesAccess == hasManageAllFilesAccess && newUseHttps == useHttps) {
+                        Log.d(TAG, "Server already running with the same config.")
+                        currentOperationalState = "Running" // Ensure correct state
+                        sendStatusUpdate() // Just update UI and notification content
+                        return START_STICKY
+                    }
 
-                     if (server != null && server!!.isAlive && uriToShare == currentSharedDirectoryUri && newRequireApprovalEnabled == requireApprovalEnabled) {
-                         Log.d(TAG, "Server already running with the same URI and approval setting, ignoring START_SERVER.")
-                         sendStatusUpdate()
-                         return START_STICKY
-                     }
-
-                     if (server != null && server!!.isAlive) {
-                          Log.d(TAG, "Server already running, but configuration changed. Stopping server to apply new settings...")
-                          stopServerInternal()
-                     }
+                    if (server != null && server!!.isAlive) {
+                        Log.d(TAG, "Server config changed. Stopping existing server first.")
+                        stopServerInternal(keepForeground = true) // Keep foreground during restart
+                    }
 
                     currentSharedDirectoryUri = uriToShare
-
-                    startServer(uriToShare)
-
+                    startServerLogic(uriToShare) // Renamed to avoid confusion
                 } else {
-                    Log.w(TAG, "Received START_SERVER action but URI extra was null.")
-                     if (server == null || !server!!.isAlive) {
-                         Log.e(TAG, "Service cannot start server: No shared directory URI provided.")
-                         currentOperationalState = "Failed: No directory selected."
-                         sendStatusUpdate()
-                     } else {
-                         Log.d(TAG, "Server already running with old URI, ignoring START_SERVER with null URI.")
-                          sendStatusUpdate()
-                     }
+                    Log.w(TAG, "START_SERVER action with null URI.")
+                    if (server == null || !server!!.isAlive) {
+                        currentOperationalState = "Failed: No directory selected."
+                        sendStatusUpdate()
+                        stopSelf() // Stop service if it can't start
+                    } else {
+                        sendStatusUpdate() // Server is running with old config, just update
+                    }
                 }
             }
             ACTION_QUERY_STATUS -> {
-                 Log.d(TAG, "Received QUERY_STATUS action.")
-                 @Suppress("DEPRECATION")
-                 val uriFromQuery: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI, Uri::class.java)
-                 } else {
-                     intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
-                 }
-                 Log.d(TAG, "QUERY_STATUS intent contained URI: $uriFromQuery")
+                Log.d(TAG, "Received QUERY_STATUS action.")
+                // Update internal state based on query
+                @Suppress("DEPRECATION")
+                val uriFromQuery: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI, Uri::class.java)
+                } else {
+                    intent.getParcelableExtra(EXTRA_SHARED_DIRECTORY_URI)
+                }
+                this.hasManageAllFilesAccess = intent.getBooleanExtra(EXTRA_HAS_ALL_FILES_ACCESS, this.hasManageAllFilesAccess)
+                this.useHttps = intent.getBooleanExtra(EXTRA_USE_HTTPS, this.useHttps)
+                if (uriFromQuery != null) this.currentSharedDirectoryUri = uriFromQuery
 
-                 if (currentSharedDirectoryUri == null && uriFromQuery != null) {
-                     Log.d(TAG, "Service adopting shared directory URI from QUERY_STATUS: $uriFromQuery")
-                     currentSharedDirectoryUri = uriFromQuery
-                 } else if (currentSharedDirectoryUri != null && uriFromQuery == null) {
-                       Log.w(TAG, "Service has a URI (${currentSharedDirectoryUri}) but QUERY_STATUS intent sent null URI. Keeping Service's URI.")
-                 } else if (currentSharedDirectoryUri != null && uriFromQuery != null && currentSharedDirectoryUri != uriFromQuery) {
-                      Log.w(TAG, "Service has URI (${currentSharedDirectoryUri}) different from QUERY_STATUS intent URI (${uriFromQuery}). Adopting Activity's URI state.")
-                      currentSharedDirectoryUri = uriFromQuery
-                       Log.d(TAG, "Service updated currentSharedDirectoryUri to: $currentSharedDirectoryUri")
-                 } else {
-                      Log.d(TAG, "Service URI state matches QUERY_STATUS URI ($currentSharedDirectoryUri) or both are null. No URI adoption needed.")
-                 }
-                 loadPreferences()
-                 sendStatusUpdate()
-                 return START_STICKY
+                loadPreferences() // Refresh prefs
+                sendStatusUpdate() // Send current status
             }
             ACTION_STOP_SERVER -> {
-                Log.d(TAG, "Received explicit STOP_SERVER action. Entering stop logic.")
-                stopServerInternal()
+                Log.d(TAG, "Received explicit STOP_SERVER action.")
+                stopServerInternal() // This will handle notification and state
                 stopSelf()
             }
             ACTION_APPROVE_CLIENT -> {
-                val clientIp = intent.getStringExtra(EXTRA_CLIENT_IP_FOR_APPROVAL) // FIX: Corrected typo here
+                val clientIp = intent.getStringExtra(EXTRA_CLIENT_IP_FOR_APPROVAL)
                 if (clientIp != null) {
-                    server?.approveClient(clientIp)
-                    Log.i(TAG, "Client $clientIp approved via notification.")
-                } else {
-                    Log.w(TAG, "ACTION_APPROVE_CLIENT received with null IP.")
+                    (server as? WebServer)?.approveClient(clientIp)
+                    Log.i(TAG, "Client $clientIp approved.")
                 }
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(APPROVAL_NOTIFICATION_ID)
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(APPROVAL_NOTIFICATION_ID)
             }
             ACTION_REJECT_CLIENT -> {
-                val clientIp = intent.getStringExtra(EXTRA_CLIENT_IP_FOR_APPROVAL) // FIX: Corrected typo here
+                val clientIp = intent.getStringExtra(EXTRA_CLIENT_IP_FOR_APPROVAL)
                 if (clientIp != null) {
-                    server?.denyClient(clientIp)
-                    Log.i(TAG, "Client $clientIp rejected via notification.")
-                } else {
-                    Log.w(TAG, "ACTION_REJECT_CLIENT received with null IP.")
+                    (server as? WebServer)?.denyClient(clientIp)
+                    Log.i(TAG, "Client $clientIp rejected.")
                 }
-                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                notificationManager.cancel(APPROVAL_NOTIFICATION_ID)
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancel(APPROVAL_NOTIFICATION_ID)
             }
             else -> {
-                Log.w(TAG, "WebServerService received unhandled intent action: ${intent?.action} (StartId: $startId)")
-                return START_STICKY
+                Log.w(TAG, "Unhandled intent action: ${intent?.action}")
+                if (!isForegroundServiceStarted && (server == null || !server!!.isAlive)) {
+                    // If service is restarted by system without a valid action and server isn't running, stop it.
+                    stopSelf()
+                }
             }
         }
         return START_STICKY
@@ -190,7 +202,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
 
     override fun onDestroy() {
         Log.d(TAG, "WebServerService onDestroy")
-        stopServerInternal()
+        stopServerInternal() // Ensure server and notification are cleaned up
         super.onDestroy()
         Log.d(TAG, "WebServerService onDestroy finished.")
     }
@@ -199,7 +211,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = getString(R.string.app_name)
             val descriptionText = "Notification channel for the Project Noodle server."
-            val importance = NotificationManager.IMPORTANCE_LOW
+            val importance = NotificationManager.IMPORTANCE_LOW // Keep low to avoid sound/vibration unless error
             val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
                 description = descriptionText
                 setShowBadge(false)
@@ -209,7 +221,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
             val notificationManager: NotificationManager =
                 getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
-            Log.d(TAG, "Notification channel created: $NOTIFICATION_CHANNEL_ID with LOW importance and no sound.")
+            Log.d(TAG, "Notification channel created: $NOTIFICATION_CHANNEL_ID.")
         }
     }
 
@@ -224,7 +236,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
             val notificationManager: NotificationManager =
                 getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
-            Log.d(TAG, "Notification channel created for approval requests: $APPROVAL_CHANNEL_ID with HIGH importance.")
+            Log.d(TAG, "Approval Notification channel created: $APPROVAL_CHANNEL_ID.")
         }
     }
 
@@ -252,29 +264,39 @@ class WebServerService : Service(), ConnectionApprovalListener {
 
         val statusText = getServerStatusText(server != null && server!!.isAlive)
 
-
-         val baseBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        val baseBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name) + " Server")
             .setContentText(statusText)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher_foreground) // Make sure this drawable exists
             .setContentIntent(contentPendingIntent)
             .setShowWhen(false)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
+            .setOngoing(currentOperationalState == "Running" || currentOperationalState == "Starting" || currentOperationalState == "Stopping") // Make ongoing only when active
 
 
-        if (currentOperationalState == "Running" || currentOperationalState == "Stopping" || currentOperationalState == "Error Stopping") {
+        if (currentOperationalState == "Running" || currentOperationalState == "Stopping" || currentOperationalState == "Error Stopping" || currentOperationalState == "Starting") {
              baseBuilder.addAction(
-                 R.drawable.ic_launcher_foreground,
+                 R.drawable.ic_launcher_foreground, // Ensure this drawable exists
                  "Stop Server",
                  stopPendingIntent
              )
         }
-
-
         return baseBuilder
     }
+
+    // Renamed to distinguish from the full startForeground lifecycle management
+    private fun updateNotificationOnly() {
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (isForegroundServiceStarted) { // Only update if service is already in foreground
+            notificationManager.notify(NOTIFICATION_ID, buildNotification().build())
+            Log.d(TAG, "Updated existing foreground notification with status: '${getServerStatusText(server != null && server!!.isAlive)}'")
+        } else {
+            Log.d(TAG, "updateNotificationOnly called, but service not in foreground. Triggering full updateNotification.")
+            updateNotification() // Fallback to full logic if not yet in foreground (should not happen often with new flow)
+        }
+    }
+
 
      private fun updateNotification() {
         val notificationManager: NotificationManager =
@@ -282,109 +304,128 @@ class WebServerService : Service(), ConnectionApprovalListener {
         notificationManager.cancel(FAILURE_NOTIFICATION_ID)
         notificationManager.cancel(APPROVAL_NOTIFICATION_ID)
 
+         val isActivelyServing = server != null && server!!.isAlive
+         val isTransitioning = currentOperationalState == "Starting" || currentOperationalState == "Stopping"
 
-         if (currentOperationalState == "Running" || currentOperationalState == "Starting" || currentOperationalState == "Stopping") {
-              val notification = buildNotification().build()
-              val statusTextForLog = getServerStatusText(server != null && server!!.isAlive)
-              startForeground(NOTIFICATION_ID, notification)
-              Log.d(TAG, "Called startForeground with status: '${statusTextForLog}'")
-         } else {
-              stopForeground(Service.STOP_FOREGROUND_REMOVE)
-              Log.d(TAG, "Called stopForeground(${Service.STOP_FOREGROUND_REMOVE}) for state: ${currentOperationalState}")
+         if (isActivelyServing || isTransitioning) {
+             if (!isForegroundServiceStarted) { // Only call startForeground if not already started
+                 startForeground(NOTIFICATION_ID, buildNotification().build())
+                 isForegroundServiceStarted = true
+                 Log.d(TAG, "Called startForeground() in updateNotification with status: '${getServerStatusText(isActivelyServing)}'")
+             } else {
+                 notificationManager.notify(NOTIFICATION_ID, buildNotification().build())
+                 Log.d(TAG, "Updated foreground notification with status: '${getServerStatusText(isActivelyServing)}'")
+             }
+         } else { // Server is stopped or failed
+             if (isForegroundServiceStarted) {
+                 stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                 isForegroundServiceStarted = false
+                 Log.d(TAG, "Called stopForeground(STOP_FOREGROUND_REMOVE) for state: ${currentOperationalState}")
+             }
+             // Remove any lingering active notification
+             notificationManager.cancel(NOTIFICATION_ID)
 
-              val statusText = getServerStatusText(server != null && server!!.isAlive)
+
+              val statusText = getServerStatusText(false) // Server is not running
 
               if (currentOperationalState.startsWith("Failed") || currentOperationalState == "Error Stopping") {
                    val failureNotificationBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
                         .setContentTitle(getString(R.string.app_name) + " Server Error")
                         .setContentText(statusText)
                         .setSmallIcon(R.drawable.ic_launcher_foreground)
-                        .setContentIntent(buildNotification().build().contentIntent)
+                        .setContentIntent(buildNotification().build().contentIntent) // Re-use intent
                         .setShowWhen(false)
-                        .setSilent(false)
+                        .setSilent(false) // Make some noise for errors
                         .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                         .setAutoCancel(true)
 
                    notificationManager.notify(FAILURE_NOTIFICATION_ID, failureNotificationBuilder.build())
                    Log.d(TAG, "Shown failure notification (ID: $FAILURE_NOTIFICATION_ID) with status: '${statusText}'")
-
               } else if (currentOperationalState == "Stopped") {
-                   Log.d(TAG, "Server successfully stopped. Foreground notification removed.")
-              } else {
-                  val nonPersistentBuilder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-                        .setContentTitle(getString(R.string.app_name) + " Server Info")
-                        .setContentText(statusText)
-                        .setSmallIcon(R.drawable.ic_launcher_foreground)
-                        .setContentIntent(buildNotification().build().contentIntent)
-                        .setShowWhen(false)
-                        .setSilent(true)
-                        .setPriority(NotificationCompat.PRIORITY_LOW)
-                        .setAutoCancel(true)
-                  notificationManager.notify(NOTIFICATION_ID, nonPersistentBuilder.build())
-                   Log.d(TAG, "Called notify (fallback, non-persistent) with status: '${statusText}'")
+                   Log.d(TAG, "Server successfully stopped. All notifications should be cleared.")
               }
          }
      }
 
      private fun getServerStatusText(isRunning: Boolean): String {
           val directoryName = currentSharedDirectoryUri?.let { uri ->
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasManageAllFilesAccess && uri.toString() == Environment.getExternalStorageDirectory().toURI().toString()) {
+                  return@let "Internal Storage (All Files Access)"
+              }
               try {
-                  // SAF only gives content:// URIs, so fromTreeUri is sufficient
-                  val documentFile = DocumentFile.fromTreeUri(applicationContext, uri)
+                  val documentFile = if (uri.scheme == "content") {
+                      DocumentFile.fromTreeUri(applicationContext, uri)
+                  } else if (uri.scheme == "file" && uri.path != null) {
+                      val file = File(uri.path!!)
+                      if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
+                  } else {
+                      null
+                  }
                   documentFile?.name ?: uri.lastPathSegment?.let {
-                       try { Uri.decode(it) } catch (e: Exception) { it }
+                       try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it } // Specify UTF-8
                   } ?: "Unknown Directory"
               } catch (e: Exception) {
                    Log.e(TAG, "Error deriving directory name from URI $uri", e)
                    uri.lastPathSegment?.let {
-                       try { Uri.decode(it) } catch (e: Exception) { it }
-                  } ?: "Error Deriving Name"
+                      try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it } // Specify UTF-8
+                 } ?: "Error Deriving Name"
               }
           } ?: "Not Selected"
 
 
           val sharedDirDisplay = if (directoryName != "Not Selected" && !directoryName.startsWith("Invalid Directory") && !directoryName.startsWith("Error Deriving Name")) "Dir: $directoryName\n" else ""
           val approvalStatus = if (requireApprovalEnabled) "Approval Required" else "Approval Not Required"
+          val protocolStatus = if (useHttps) "HTTPS Enabled" else "HTTP Only"
 
          return if (isRunning) {
+             val protocol = if(useHttps) "https" else "http"
              if (currentIpAddress != null && currentServerPort != -1) {
-                 "${sharedDirDisplay}${approvalStatus}\nServer running:\nhttp://$currentIpAddress:$currentServerPort"
+                 "${sharedDirDisplay}${protocolStatus}\n${approvalStatus}\nServer running:\n$protocol://$currentIpAddress:$currentServerPort"
              } else if (currentServerPort != -1) {
-                  "${sharedDirDisplay}${approvalStatus}\nServer running on port $currentServerPort\n(No Wi-Fi IP)"
+                  "${sharedDirDisplay}${protocolStatus}\n${approvalStatus}\nServer running on port $currentServerPort\n(No Wi-Fi IP)"
              } else {
-                 "${sharedDirDisplay}${approvalStatus}\nServer is running..."
+                 "${sharedDirDisplay}${protocolStatus}\n${approvalStatus}\nServer is running..."
              }
          } else {
              when (currentOperationalState) {
-                  "Stopped" -> "${sharedDirDisplay}Server Stopped.\n$approvalStatus"
-                  "Failed: No directory selected." -> "Server stopped: No directory selected.\n$approvalStatus"
-                  "Failed: Invalid Directory" -> "${directoryName}\nServer failed: Invalid directory.\n$approvalStatus"
-                  "Failed: No Port Found" -> "Server failed: No port available.\n$approvalStatus"
-                  "Failed: IO Error" -> "Server failed: IO Error.\n$approvalStatus"
-                  "Failed: Unexpected Error" -> "Server failed: Unexpected error.\n$approvalStatus"
-                  "Error Stopping" -> "Error stopping server.\n$approvalStatus"
-                  "Starting" -> "Starting server...\n$approvalStatus"
-                  "Stopping" -> "Stopping server...\n$approvalStatus"
-                   "Requesting Permission" -> "Requesting notification permission...\n$approvalStatus"
-                  else -> "Server Stopped.\n$approvalStatus"
+                  "Stopped" -> "${sharedDirDisplay}Server Stopped.\n${protocolStatus}\n${approvalStatus}"
+                  "Failed: No directory selected." -> "Server stopped: No directory selected.\n${protocolStatus}\n${approvalStatus}"
+                  "Failed: Invalid Directory" -> "${directoryName}\nServer failed: Invalid directory.\n${protocolStatus}\n${approvalStatus}"
+                  "Failed: No Port Found" -> "Server failed: No port available.\n${protocolStatus}\n${approvalStatus}"
+                  "Failed: IO Error" -> "Server failed: IO Error.\n${protocolStatus}\n${approvalStatus}"
+                  "Failed: Unexpected Error" -> "Server failed: Unexpected error.\n${protocolStatus}\n${approvalStatus}"
+                  "Error Stopping" -> "Error stopping server.\n${protocolStatus}\n${approvalStatus}"
+                  "Starting" -> "Starting server...\n${protocolStatus}\n${approvalStatus}"
+                  "Stopping" -> "Stopping server...\n${protocolStatus}\n${approvalStatus}"
+                   "Requesting Permission" -> "Requesting notification permission...\n${protocolStatus}\n${approvalStatus}"
+                  else -> "Server Stopped.\n${protocolStatus}\n${approvalStatus}"
              }
          }
     }
 
     private fun sendStatusUpdate(): Unit {
         val directoryNameForBroadcast = currentSharedDirectoryUri?.let { uri ->
-              try {
-                  // SAF only gives content:// URIs, so fromTreeUri is sufficient
-                  val documentFile = DocumentFile.fromTreeUri(applicationContext, uri)
-                  documentFile?.name ?: uri.lastPathSegment?.let {
-                       try { Uri.decode(it) } catch (e: Exception) { it }
-                  } ?: "Unknown Directory"
-              } catch (e: Exception) {
-                   Log.e(TAG, "Error deriving directory name for broadcast from URI $uri", e)
+             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasManageAllFilesAccess && uri.toString() == Environment.getExternalStorageDirectory().toURI().toString()) {
+                 return@let "Internal Storage (All Files Access)"
+             }
+             try {
+                 val documentFile = if (uri.scheme == "content") {
+                     DocumentFile.fromTreeUri(applicationContext, uri)
+                 } else if (uri.scheme == "file" && uri.path != null) {
+                     val file = File(uri.path!!)
+                     if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
+                 } else {
+                     null
+                 }
+                 documentFile?.name ?: uri.lastPathSegment?.let {
+                      try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
+                 } ?: "Unknown Directory"
+             } catch (e: Exception) {
+                  Log.e(TAG, "Error deriving directory name for broadcast from URI $uri", e)
                    uri.lastPathSegment?.let {
-                       try { Uri.decode(it) } catch (e: Exception) { it }
+                      try { URLDecoder.decode(it, "UTF-8") } catch (e: Exception) { it }
                  } ?: "Error Deriving Name"
-              }
+             }
          } ?: "Not Selected"
 
 
@@ -395,45 +436,55 @@ class WebServerService : Service(), ConnectionApprovalListener {
             putExtra(EXTRA_SERVER_IP, currentIpAddress)
             putExtra(EXTRA_SERVER_PORT, currentServerPort)
             putExtra(EXTRA_SHARED_DIRECTORY_NAME, directoryNameForBroadcast)
+            putExtra(EXTRA_USE_HTTPS, useHttps)
         }
         localBroadcastManager.sendBroadcast(statusIntent)
-        Log.d(TAG, "Sent status broadcast. State: $currentOperationalState, Running: ${server?.isAlive}, Dir: $directoryNameForBroadcast, Approval Req: $requireApprovalEnabled")
+        Log.d(TAG, "Sent status broadcast. State: $currentOperationalState, Running: ${server?.isAlive}, Dir: $directoryNameForBroadcast, Approval Req: $requireApprovalEnabled, AllFilesAccess: $hasManageAllFilesAccess, HTTPS: $useHttps")
 
         updateNotification()
          return Unit
     }
 
 
-    private fun startServer(uriToShare: Uri): Unit {
+    private fun startServerLogic(uriToShare: Uri): Unit { // Renamed from startServer
         if (server != null && server!!.isAlive) {
-            Log.d(TAG, "startServer(Service): Server is already running.")
+            Log.d(TAG, "startServerLogic: Server is already running.")
             currentOperationalState = "Running"
              sendStatusUpdate()
             return
         }
 
-        Log.d(TAG, "startServer(Service): Attempting to start server...")
-         currentOperationalState = "Starting"
+        Log.d(TAG, "startServerLogic: Attempting to start server... HTTPS enabled: $useHttps")
+         currentOperationalState = "Starting" // State already set in onStartCommand
          currentSharedDirectoryUri = uriToShare
 
-         sendStatusUpdate()
-
+         sendStatusUpdate() // Update UI and notification content
 
         val dynamicPort = findAvailablePort()
 
         if (dynamicPort != -1) {
             Log.d(TAG, "Service: Found available port: $dynamicPort")
             currentServerPort = dynamicPort
-
             currentIpAddress = getWifiIPAddress(applicationContext)
              Log.d(TAG, "Service: Current Wi-Fi IP address: $currentIpAddress")
 
-            // SAF only gives content:// URIs, so fromTreeUri is sufficient
-            val rootDoc: DocumentFile? = DocumentFile.fromTreeUri(applicationContext, uriToShare)
-
+            val rootDoc: DocumentFile? = if (uriToShare.scheme == "content") {
+                DocumentFile.fromTreeUri(applicationContext, uriToShare)
+            } else if (uriToShare.scheme == "file" && uriToShare.path != null) {
+                try {
+                    val file = File(uriToShare.path!!)
+                    if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
+                } catch (e: Exception) {
+                    Log.e(TAG, "Service: Error creating DocumentFile.fromFile for URI ${uriToShare.toString()}", e)
+                    null
+                }
+            } else {
+                Log.w(TAG, "Service: Unexpected URI scheme for sharedDirectoryUri: ${uriToShare.toString()}")
+                null
+            }
 
             if (rootDoc == null || !rootDoc.exists() || !rootDoc.isDirectory) {
-                 Log.e(TAG, "Service: Invalid or inaccessible root DocumentFile for URI: $uriToShare. Cannot start server.")
+                 Log.e(TAG, "Service: Invalid root DocumentFile for URI: $uriToShare. Cannot start.")
                  currentOperationalState = "Failed: Invalid Directory"
                  currentServerPort = -1
                  currentIpAddress = null
@@ -442,43 +493,46 @@ class WebServerService : Service(), ConnectionApprovalListener {
                  return
             }
 
-            server = WebServer(dynamicPort, applicationContext, uriToShare, currentIpAddress, requireApprovalEnabled, this)
-
-
             try {
-                Log.d(TAG, "Service: Attempting to start NanoHTTPD Server on port $currentServerPort.")
+                server = if (useHttps) {
+                    Log.d(TAG, "Service: Instantiating HttpsWebServer.")
+                    HttpsWebServer(
+                        dynamicPort, applicationContext, uriToShare, currentIpAddress,
+                        requireApprovalEnabled, this, hasManageAllFilesAccess
+                    )
+                } else {
+                    Log.d(TAG, "Service: Instantiating WebServer (HTTP).")
+                    WebServer(
+                        dynamicPort, applicationContext, uriToShare, currentIpAddress,
+                        requireApprovalEnabled, this, hasManageAllFilesAccess
+                    )
+                }
 
+                Log.d(TAG, "Service: Attempting to start NanoHTTPD Server on port $currentServerPort.")
                 server?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
 
-
                 if (server?.isAlive == true) {
-                     Log.d(TAG, "Service: NanoHTTPD Server started successfully (isAlive = true).")
+                     Log.d(TAG, "Service: NanoHTTPD Server started successfully.")
                      currentOperationalState = "Running"
-                     sendStatusUpdate()
-
                 } else {
                      Log.e(TAG, "Service: NanoHTTPD Server start() returned, but isAlive is false.")
                      currentOperationalState = "Failed: Server stopped unexpectedly."
-                     currentServerPort = -1
-                     currentIpAddress = null
-                     server = null
-                     sendStatusUpdate()
+                     server = null // Clear potentially problematic server instance
                 }
-
-            } catch (e: IOException) {
-                Log.e(TAG, "Service: Failed to start NanoHTTPD Server on port $currentServerPort (IOException): ${e.message}", e)
+            } catch (e: IOException) { // Catch IOException from HttpsWebServer init or server.start()
+                Log.e(TAG, "Service: Failed to start NanoHTTPD Server (IOException): ${e.message}", e)
                 currentOperationalState = "Failed: IO Error"
-                 currentServerPort = -1
-                 currentIpAddress = null
                  server = null
-                 sendStatusUpdate()
             } catch (e: Exception) {
                 Log.e(TAG, "Service: An unexpected error occurred during server startup", e)
                 currentOperationalState = "Failed: Unexpected Error"
-                 currentServerPort = -1
-                 currentIpAddress = null
                  server = null
-                 sendStatusUpdate()
+            } finally {
+                if (currentOperationalState.startsWith("Failed")) {
+                    currentServerPort = -1
+                    currentIpAddress = null
+                }
+                sendStatusUpdate() // Final status update based on outcome
             }
         } else {
              Log.e(TAG, "Service: Failed to find an available port.")
@@ -488,43 +542,45 @@ class WebServerService : Service(), ConnectionApprovalListener {
              server = null
              sendStatusUpdate()
         }
-         return Unit
     }
 
-    private fun stopServerInternal(): Unit {
+    // MODIFIED: Added keepForeground parameter
+    private fun stopServerInternal(keepForeground: Boolean = false): Unit {
         if (server == null) {
              Log.d(TAG, "stopServerInternal(Service): Server instance is null. Already stopped.")
              currentOperationalState = "Stopped"
              currentServerPort = -1
              currentIpAddress = null
+             if (!keepForeground) {
+                 isForegroundServiceStarted = false // Reset flag if not keeping foreground
+             }
              sendStatusUpdate()
              return
         }
 
-        Log.d(TAG, "stopServerInternal(Service): Attempting to stop NanoHTTPD Server.")
+        Log.d(TAG, "stopServerInternal(Service): Attempting to stop NanoHTTPD Server. keepForeground: $keepForeground")
          currentOperationalState = "Stopping"
-         sendStatusUpdate()
-
+         if (!keepForeground) {
+             isForegroundServiceStarted = false
+         }
+         sendStatusUpdate() // Update notification to "Stopping..."
 
         try {
             server?.stop()
             Log.d(TAG, "Service: NanoHTTPD Server stop() called.")
              currentOperationalState = "Stopped"
-             currentServerPort = -1
-             currentIpAddress = null
-             server = null
-             sendStatusUpdate()
-
         } catch (e: Exception) {
              Log.e(TAG, "Service: Error calling stop() on NanoHTTPD", e)
              currentOperationalState = "Error Stopping"
-             currentServerPort = -1
-             currentIpAddress = null
-             server = null
-             sendStatusUpdate()
+        } finally {
+            currentServerPort = -1
+            currentIpAddress = null
+            server = null
+             if (!keepForeground) {
+                 isForegroundServiceStarted = false
+             }
+            sendStatusUpdate() // Final update (e.g., "Stopped" or "Error Stopping")
         }
-
-         return Unit
     }
 
 
@@ -644,6 +700,16 @@ class WebServerService : Service(), ConnectionApprovalListener {
     private fun loadPreferences() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
         requireApprovalEnabled = prefs.getBoolean(PREF_REQUIRE_APPROVAL, false)
-        Log.d(TAG, "Service loaded preferences: requireApprovalEnabled = $requireApprovalEnabled")
+        useHttps = prefs.getBoolean(PREF_USE_HTTPS, false)
+        Log.d(TAG, "Service loaded preferences: requireApprovalEnabled = $requireApprovalEnabled, useHttps = $useHttps")
+    }
+
+    private fun updateManageAllFilesAccessStatus() {
+        hasManageAllFilesAccess = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            false
+        }
+        Log.d(TAG, "Service updated hasManageAllFilesAccess: $hasManageAllFilesAccess")
     }
 }

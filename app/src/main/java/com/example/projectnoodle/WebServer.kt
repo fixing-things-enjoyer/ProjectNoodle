@@ -19,6 +19,7 @@ import java.util.HashMap
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
+import android.os.Environment
 
 private const val TAG = "ProjectNoodleWebServer" // Renamed TAG for clarity
 
@@ -30,24 +31,44 @@ interface ConnectionApprovalListener {
     fun onNewClientConnectionAttempt(clientIp: String)
 }
 
-class WebServer(
+// MODIFIED: Added 'open' keyword to allow inheritance
+open class WebServer(
     port: Int,
     private val applicationContext: Context, // Keep context reference
     private val sharedDirectoryUri: Uri, // Keep URI reference
     private val serverIpAddress: String?, // Keep IP reference
-    private val requireApprovalEnabled: Boolean, // Approval setting
-    private val approvalListener: ConnectionApprovalListener? // Listener for approval requests
+    private val requireApprovalEnabled: Boolean,
+    private val approvalListener: ConnectionApprovalListener?, // Listener for approval requests
+    // MODIFIED: Added hasManageAllFilesAccess to constructor, changed to 'protected'
+    protected val hasManageAllFilesAccess: Boolean // NEW: Add this to constructor (using protected for subclasses)
 ) : NanoHTTPD(port) {
 
     // FIX: Added the approvedClients member variable
     private val approvedClients = mutableSetOf<String>()
 
-    // MODIFIED: rootDocumentFile initialization to use DocumentFile.fromTreeUri exclusively
-    private val rootDocumentFile: DocumentFile? = DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
+    // MODIFIED: rootDocumentFile initialization to use DocumentFile.fromTreeUri or fromFile based on scheme
+    private val rootDocumentFile: DocumentFile? = if (sharedDirectoryUri.scheme == "file" && sharedDirectoryUri.path != null && hasManageAllFilesAccess) {
+        try {
+            val file = File(sharedDirectoryUri.path!!)
+            if (file.exists() && file.isDirectory && file.canRead()) DocumentFile.fromFile(file) else null
+        } catch (e: Exception) {
+            Log.e(TAG, "WebServer: Error creating DocumentFile.fromFile for URI ${sharedDirectoryUri.toString()}", e)
+            null
+        }
+    } else if (sharedDirectoryUri.scheme == "content") {
+        DocumentFile.fromTreeUri(applicationContext, sharedDirectoryUri)
+    } else {
+        // Fallback for other unexpected schemes or if hasManageAllFilesAccess is false for a file:// URI
+        Log.w(TAG, "WebServer: Unexpected URI scheme or permissions for sharedDirectoryUri: ${sharedDirectoryUri.toString()}")
+        null
+    }
+
 
     init {
         Log.d(TAG, "WebServer: Initialized with port $port and shared directory URI ${sharedDirectoryUri.toString()}")
         Log.d(TAG, "WebServer: Connection approval required: $requireApprovalEnabled")
+        Log.d(TAG, "WebServer: Has All Files Access (passed): $hasManageAllFilesAccess")
+
 
         if (rootDocumentFile == null || !rootDocumentFile.exists() || !rootDocumentFile.isDirectory) {
             Log.e(TAG, "WebServer: Invalid or inaccessible root DocumentFile for URI: ${sharedDirectoryUri.toString()}")
@@ -79,7 +100,7 @@ class WebServer(
         for (segment in segments) {
              val decodedSegment = try { URLDecoder.decode(segment, StandardCharsets.UTF_8.name()) } catch (e: Exception) { segment }
 
-            // DocumentFile.findFile() works for content:// backed DocumentFile instances.
+            // DocumentFile.findFile() works for both content:// and file:// backed DocumentFile instances.
             val foundChild = currentDocument?.findFile(decodedSegment)
             if (foundChild == null) {
                 Log.w(TAG, "findDocumentFile: Could not find segment '$decodedSegment' (original segment: '$segment') in ${currentDocument?.name ?: "current directory"} (URI: ${currentDocument?.uri}). Path not found.")
@@ -228,7 +249,12 @@ class WebServer(
                         val reader = indexHtmlStream.bufferedReader()
                         val indexHtmlContent = reader.use { it.readText() }
 
-                        val serverBaseUrl = if (serverIpAddress != null) "http://$serverIpAddress:$listeningPort" else null
+                        val serverBaseUrl = if (serverIpAddress != null) {
+                            val protocol = if (this is HttpsWebServer) "https" else "http" // NEW: Determine protocol for injection
+                            "$protocol://$serverIpAddress:$listeningPort"
+                        } else {
+                            null
+                        }
                         val headEndTag = "</head>"
                         val scriptToInject = serverBaseUrl?.let { url ->
                             "<script>\n" +
@@ -340,7 +366,12 @@ class WebServer(
 
         val jsonArray = JSONArray()
 
-        val serverBaseUrl = if (serverIpAddress != null) "http://$serverIpAddress:$listeningPort" else null
+        val serverBaseUrl = if (serverIpAddress != null) {
+             val protocol = if (this is HttpsWebServer) "https" else "http" // NEW: Determine protocol for API URLs
+             "$protocol://$serverIpAddress:$listeningPort"
+        } else {
+             null
+        }
 
         if (rootDocumentFile != null && directoryDocument.uri != rootDocumentFile.uri) {
             val parentPath = getParentPath(requestedPath)
