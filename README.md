@@ -1,6 +1,6 @@
 # Project Noodle
 
-![Project Noodle Icon](app/src/main/assets/project_noodle.png)
+<img src="app/src/main/assets/project_noodle.png" alt="Project Noodle Icon" width="100">
 
 Project Noodle transforms your Android device into a personal, portable file server, accessible directly through any web browser on your local network. Share files, manage directories, and facilitate seamless data transfer without the need for cloud services or complex setups.
 
