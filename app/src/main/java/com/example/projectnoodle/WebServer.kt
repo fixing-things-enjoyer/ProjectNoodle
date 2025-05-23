@@ -32,7 +32,7 @@ interface ConnectionApprovalListener {
 open class WebServer(
     port: Int,
     private val applicationContext: Context, // Keep context reference
-    private val sharedDirectoryUri: Uri, // Keep URI reference
+    sharedDirectoryUri: Uri, // Keep URI reference
     private val serverIpAddress: String?, // Keep IP reference
     private val requireApprovalEnabled: Boolean,
     private val approvalListener: ConnectionApprovalListener? // Listener for approval requests
@@ -198,7 +198,7 @@ open class WebServer(
                  Log.d(TAG, "WebServer: Handling GET /files/ for path: $filePath")
                  val fileDocument = findDocumentFile(filePath)
                  if (fileDocument != null && fileDocument.isFile) {
-                     serveFile(session, fileDocument)
+                     serveFile(fileDocument)
                  } else if (fileDocument != null && fileDocument.isDirectory) {
                       Log.w(TAG, "WebServer: /files/ request for a directory: ${fileDocument.uri}")
                        newFixedLengthResponse(Status.BAD_REQUEST, "text/plain", "Error 400: Path is a directory, not a file.")
@@ -318,13 +318,6 @@ open class WebServer(
      private fun newJsonResponse(status: Status, jsonMap: Map<String, Any?>): Response {
         val jsonObject = JSONObject(jsonMap)
         val jsonString = jsonObject.toString()
-        val response = newFixedLengthResponse(status, MIME_JSON, jsonString)
-        response.addHeader("Access-Control-Allow-Origin", "*")
-        return response
-    }
-
-    private fun newJsonResponse(status: Status, jsonArray: JSONArray): Response {
-        val jsonString = jsonArray.toString()
         val response = newFixedLengthResponse(status, MIME_JSON, jsonString)
         response.addHeader("Access-Control-Allow-Origin", "*")
         return response
@@ -703,7 +696,7 @@ open class WebServer(
     }
 
 
-    private fun serveFile(session: IHTTPSession, documentFile: DocumentFile): Response {
+    private fun serveFile(documentFile: DocumentFile): Response {
         try {
             val name = documentFile.name
             val mimeType = documentFile.type
@@ -811,9 +804,5 @@ open class WebServer(
          Log.i(TAG, "WebServer: Denying client: $clientIdentifier")
          approvedClients.remove(clientIdentifier)
           // TODO: Update persisted approvedClients set in SharedPreferences
-     }
-
-     fun isClientApproved(clientIdentifier: String): Boolean {
-         return approvedClients.contains(clientIdentifier)
      }
 }

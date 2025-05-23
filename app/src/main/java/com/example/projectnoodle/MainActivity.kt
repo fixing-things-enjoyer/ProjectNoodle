@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
@@ -47,21 +48,18 @@ import java.security.Security
 
 private const val TAG = "ProjectNoodleActivity"
 private const val PREF_SHARED_DIRECTORY_URI = "pref_shared_directory_uri"
-// MOVED: PREF_REQUIRE_APPROVAL and PREF_USE_HTTPS are now public constants in WebServerService.kt
 
 class MainActivity : ComponentActivity() {
 
     private var serverOperationalState by mutableStateOf("Stopped")
-    private var networkStatusMessage by mutableStateOf("Waiting for server...")
     private var serverPort by mutableIntStateOf(-1)
-    private var serverIpAddress by mutableStateOf<String?>(null)
+    private var serverIpAddress by mutableStateOf<String?>(null) // This needs to be passed
 
     private var sharedDirectoryUri by mutableStateOf<Uri?>(null)
     private var sharedDirectoryNameDisplay by mutableStateOf("Not Selected")
 
     private var requireApprovalEnabled by mutableStateOf(false)
     private var useHttps by mutableStateOf(false) // NEW: HTTPS toggle state
-    private var showCommonDirectoryPicker by mutableStateOf(false)
 
 
     private lateinit var openDirectoryPickerLauncher: ActivityResultLauncher<Uri?>
@@ -71,7 +69,7 @@ class MainActivity : ComponentActivity() {
 
 
     override fun onCreate(saved: Bundle?) {
-        // NEW: Add Bouncy Castle provider at the highest priority as early as possible
+        // Add Bouncy Castle provider at the highest priority as early as possible
         // This is done BEFORE super.onCreate() to ensure it's available for all security API calls.
         if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
             Security.insertProviderAt(BouncyCastleProvider(), 1) // Insert at position 1
@@ -118,7 +116,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     ServerStatus(
                         operationalState = serverOperationalState,
-                        networkStatus = networkStatusMessage,
+                        serverIpAddress = serverIpAddress, // Pass serverIpAddress
                         port = serverPort,
                         sharedDirectoryName = sharedDirectoryNameDisplay,
                         requireApprovalEnabled = requireApprovalEnabled,
@@ -129,24 +127,15 @@ class MainActivity : ComponentActivity() {
                         onApprovalToggleChange = { enabled ->
                             requireApprovalEnabled = enabled
                             savePreferences(enabled, useHttps, sharedDirectoryUri) // NEW: Save HTTPS state
-                             if (serverOperationalState == "Running" || serverOperationalState == "Starting" || serverOperationalState == "Stopping") {
-                                 networkStatusMessage = "Setting saved.\nStop and restart server to apply."
-                                 sendStatusUpdateForUI(serverOperationalState, networkStatusMessage)
-                             } else {
-                                networkStatusMessage = "Server is stopped.\nApproval ${if (enabled) "Required" else "Not Required"}"
-                                sendStatusUpdateForUI(serverOperationalState, networkStatusMessage)
-                             }
+                            showAppToast("Setting saved. Restart server to apply changes to approval or HTTPS.")
+                            // No specific UI status update needed here, as toggle state is visible
+                            // and toast handles the 'apply' message.
                         },
                         onHttpsToggleChange = { enabled -> // NEW: Handle HTTPS toggle
                             useHttps = enabled
                             savePreferences(requireApprovalEnabled, enabled, sharedDirectoryUri) // NEW: Save HTTPS state
-                            if (serverOperationalState == "Running" || serverOperationalState == "Starting" || serverOperationalState == "Stopping") {
-                                networkStatusMessage = "Setting saved.\nStop and restart server to apply."
-                                sendStatusUpdateForUI(serverOperationalState, networkStatusMessage)
-                            } else {
-                                networkStatusMessage = "Server is stopped.\nHTTPS ${if (enabled) "Enabled" else "Disabled"}"
-                                sendStatusUpdateForUI(serverOperationalState, networkStatusMessage)
-                            }
+                            showAppToast("Setting saved. Restart server to apply changes to approval or HTTPS.")
+                            // No specific UI status update needed here, as toggle state is visible
                         }
                     )
                 }
@@ -169,7 +158,7 @@ class MainActivity : ComponentActivity() {
           val queryIntent = Intent(this, WebServerService::class.java).apply {
                action = ACTION_QUERY_STATUS
                putExtra(EXTRA_SHARED_DIRECTORY_URI, sharedDirectoryUri)
-               putExtra(EXTRA_USE_HTTPS, useHttps) // NEW: Pass HTTPS state on query
+               putExtra(EXTRA_USE_HTTPS, useHttps) // Pass HTTPS state on query
           }
           startService(queryIntent)
      }
@@ -205,7 +194,6 @@ class MainActivity : ComponentActivity() {
 
          updateSharedDirectoryDisplayName()
 
-         networkStatusMessage = "Loading server status..."
          serverOperationalState = "Unknown"
     }
 
@@ -228,7 +216,7 @@ class MainActivity : ComponentActivity() {
                  val documentFile = if (uri.scheme == "content") {
                      DocumentFile.fromTreeUri(applicationContext, uri)
                  } else {
-                     null // Only content:// URIs are expected now
+                     null
                  }
 
                  documentFile?.name ?: uri.lastPathSegment?.let {
@@ -253,7 +241,6 @@ class MainActivity : ComponentActivity() {
                     Log.d(TAG, "MainActivity: Received status update broadcast. (HTTPS: ${intent.getBooleanExtra(EXTRA_USE_HTTPS, false)})")
                     val isRunning = intent.getBooleanExtra(EXTRA_SERVER_IS_RUNNING, false)
                     val opState = intent.getStringExtra(EXTRA_SERVER_OPERATIONAL_STATE) ?: "Unknown"
-                    val statusMsg = intent.getStringExtra(EXTRA_SERVER_STATUS_MESSAGE) ?: "Unknown Status"
                     val ipAddress = intent.getStringExtra(EXTRA_SERVER_IP)
                     val port = intent.getIntExtra(EXTRA_SERVER_PORT, -1)
                     val dirNameFromService = intent.getStringExtra(EXTRA_SHARED_DIRECTORY_NAME) ?: "Not Selected"
@@ -262,7 +249,6 @@ class MainActivity : ComponentActivity() {
 
                     runOnUiThread {
                         serverOperationalState = opState
-                        networkStatusMessage = statusMsg
                         serverIpAddress = ipAddress
                         serverPort = port
                         sharedDirectoryNameDisplay = dirNameFromService
@@ -280,9 +266,8 @@ class MainActivity : ComponentActivity() {
     private fun startServer() {
          if (sharedDirectoryUri == null) {
              Log.w(TAG, "startServer (Activity): Cannot start server, no directory selected (after all checks).")
-             serverOperationalState = "Stopped"
-             networkStatusMessage = "Please select a directory to share."
-             sendStatusUpdateForUI("Stopped", "Please select a directory to share.")
+             serverOperationalState = "Stopped" // Ensure state is correct
+             showAppToast("Please select a directory to share.", Toast.LENGTH_LONG)
              return
          }
 
@@ -296,9 +281,8 @@ class MainActivity : ComponentActivity() {
                  Log.d(TAG, "POST_NOTIFICATIONS permission not granted, requesting...")
                  requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                  serverOperationalState = "Requesting Permission"
-                 networkStatusMessage = "Requesting notification permission..."
-                 sendStatusUpdateForUI("Requesting Permission", "Requesting notification permission...")
-
+                 // No toast here as the permission dialog is immediate feedback
+                 // Status is implicitly "Requesting Permission"
                  return
              } else {
                  Log.d(TAG, "POST_NOTIFICATIONS permission already granted.")
@@ -313,9 +297,8 @@ class MainActivity : ComponentActivity() {
     private fun startServerAfterPermissionGranted() {
          if (sharedDirectoryUri == null) {
              Log.w(TAG, "startServerAfterPermissionGranted (Activity): Cannot start server, no directory selected.")
-             serverOperationalState = "Stopped"
-             networkStatusMessage = "Please select a directory to share."
-             sendStatusUpdateForUI("Stopped", "Please select a directory to share.")
+             serverOperationalState = "Stopped" // Ensure state is correct
+             showAppToast("Please select a directory to share.", Toast.LENGTH_LONG)
              return
          }
 
@@ -328,10 +311,9 @@ class MainActivity : ComponentActivity() {
             putExtra(EXTRA_USE_HTTPS, useHttps) // NEW: Pass HTTPS preference
         }
 
-        serverOperationalState = "Starting"
-        networkStatusMessage = "Starting server..."
-        sendStatusUpdateForUI("Starting", "Starting server...")
-
+        // The service will update its internal operational state and notify the UI
+        sendStatusUpdateForUI("Starting", "Starting server...") // statusMsg here is for the broadcast only now.
+        // No explicit toast here, as the notification will also reflect "Starting"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
@@ -341,8 +323,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleNotificationPermissionDenied() {
-        serverOperationalState = "Stopped"
-        networkStatusMessage = "Notification permission denied.\nServer cannot run in foreground to stay active."
+        serverOperationalState = "Stopped" // Ensure state is correct
         Log.w(TAG, "Notification permission denied. Server start blocked.")
         sendStatusUpdateForUI("Stopped", "Notification permission denied.\nServer cannot run in foreground to stay active.")
     }
@@ -351,16 +332,14 @@ class MainActivity : ComponentActivity() {
     private fun stopServer() {
         Log.d(TAG, "stopServer (Activity): Calling startService with STOP_SERVER action.")
 
-        serverOperationalState = "Stopping"
-        networkStatusMessage = "Stopping server..."
+        // The service will update its internal operational state and notify the UI
         sendStatusUpdateForUI("Stopping", "Stopping server...")
-
-
         val serviceIntent = Intent(this, WebServerService::class.java).apply {
             action = ACTION_STOP_SERVER
         }
 
         val stopped = startService(serviceIntent)
+        // No toast here, as the operationalState changes and notification updates.
         Log.d(TAG, "startService with STOP_SERVER action returned: $stopped")
     }
 
@@ -368,11 +347,11 @@ class MainActivity : ComponentActivity() {
          val statusIntent = Intent(ACTION_SERVER_STATUS_UPDATE).apply {
              putExtra(EXTRA_SERVER_IS_RUNNING, opState == "Running" || opState == "Starting" || opState == "Stopping")
              putExtra(EXTRA_SERVER_OPERATIONAL_STATE, opState)
-             putExtra(EXTRA_SERVER_STATUS_MESSAGE, statusMsg)
+             putExtra(EXTRA_SERVER_STATUS_MESSAGE, statusMsg) // This extra is currently unused in MainActivity, but kept for service logic.
              putExtra(EXTRA_SERVER_IP, serverIpAddress)
              putExtra(EXTRA_SERVER_PORT, serverPort)
              putExtra(EXTRA_SHARED_DIRECTORY_NAME, sharedDirectoryNameDisplay)
-             putExtra(EXTRA_USE_HTTPS, useHttps) // NEW: Ensure current HTTPS state is passed
+             putExtra(EXTRA_USE_HTTPS, useHttps) // Ensure current HTTPS state is passed
          }
          localBroadcastManager.sendBroadcast(statusIntent)
          Log.d(TAG, "Sent local UI status update broadcast. State: $opState, Msg: '$statusMsg'")
@@ -387,18 +366,8 @@ class MainActivity : ComponentActivity() {
     private fun handleDirectoryPicked(uri: Uri?) {
         if (uri == null) {
             Log.d(TAG, "Directory picker cancelled or no URI returned.")
-            val currentMsg = when (serverOperationalState) {
-                 "Running" -> "Directory selection cancelled.\nServer still running with:\n$sharedDirectoryNameDisplay"
-                 "Starting" -> "Directory selection cancelled.\nStarting server with:\n$sharedDirectoryNameDisplay..."
-                 "Stopping" -> "Directory selection cancelled.\nStopping server..."
-                  "Requesting Permission" -> "Directory selection cancelled.\nRequesting notification permission with:\n$sharedDirectoryNameDisplay..."
-                 else -> {
-                      if (sharedDirectoryUri != null) "Directory selected:\n$sharedDirectoryNameDisplay\nServer is stopped."
-                      else "Server is stopped.\nPlease select a directory."
-                 }
-            }
-             sendStatusUpdateForUI(serverOperationalState, currentMsg)
-
+            // No explicit toast, as the UI already shows current directory if one was selected.
+            // If no directory was selected before, the "Select directory" button implies need for action.
             return
         }
 
@@ -426,48 +395,43 @@ class MainActivity : ComponentActivity() {
             updateSharedDirectoryDisplayName()
 
 
-            savePreferences(requireApprovalEnabled, useHttps, sharedDirectoryUri) // NEW: Save HTTPS state
+            savePreferences(requireApprovalEnabled, useHttps, sharedDirectoryUri) // Save HTTPS state
 
 
             Log.d(TAG, "Shared directory state updated in Activity: URI = $sharedDirectoryUri, Display Name = $sharedDirectoryNameDisplay")
 
-             val newMsg = when (serverOperationalState) {
-                 "Running" -> "Directory updated to: $sharedDirectoryNameDisplay\n(Stop/Start server to apply)"
-                 "Starting" -> "Directory updated to: $sharedDirectoryNameDisplay\nServer is starting..."
-                 "Stopping" -> "Directory updated to: $sharedDirectoryNameDisplay\nServer is stopping..."
-                 "Requesting Permission" -> "Directory selected: $sharedDirectoryNameDisplay\nRequesting notification permission..."
-                 else -> {
-                      "Directory selected: $sharedDirectoryNameDisplay\nServer is stopped."
-                 }
-            }
-             networkStatusMessage = newMsg
-             sendStatusUpdateForUI(serverOperationalState, networkStatusMessage)
+             // Show an info toast about directory change
+            showAppToast("Shared directory set to: $sharedDirectoryNameDisplay. Restart server to apply.", Toast.LENGTH_LONG)
+             // No need for sendStatusUpdateForUI, as UI updates directly via sharedDirectoryNameDisplay state.
 
 
         } catch (e: SecurityException) {
             Log.e(TAG, "Failed to get DocumentFile from URI $uri or access content resolver.", e)
             sharedDirectoryUri = null
             updateSharedDirectoryDisplayName()
-             networkStatusMessage = "Failed to get necessary directory permissions."
-             serverOperationalState = "Stopped"
-             savePreferences(requireApprovalEnabled, useHttps, null) // NEW: Save HTTPS state
-            sendStatusUpdateForUI("Stopped", networkStatusMessage)
+            serverOperationalState = "Stopped"
+            savePreferences(requireApprovalEnabled, useHttps, null) // Save HTTPS state
+            showAppToast("Failed to get necessary directory permissions for $uri.", Toast.LENGTH_LONG)
         } catch (e: Exception) {
             Log.e(TAG, "Error handling picked directory URI: $uri", e)
             sharedDirectoryUri = null
             updateSharedDirectoryDisplayName()
-             networkStatusMessage = "Error processing selected directory."
-             serverOperationalState = "Stopped"
-             savePreferences(requireApprovalEnabled, useHttps, null) // NEW: Save HTTPS state
-            sendStatusUpdateForUI("Stopped", networkStatusMessage)
+            serverOperationalState = "Stopped"
+            savePreferences(requireApprovalEnabled, useHttps, null) // Save HTTPS state
+            showAppToast("Error processing selected directory for $uri.", Toast.LENGTH_LONG)
         }
+    }
+
+    // Helper function to show toasts
+    private fun showAppToast(message: String, duration: Int = Toast.LENGTH_SHORT) {
+        Toast.makeText(this, message, duration).show()
     }
 }
 
 @Composable
 fun ServerStatus(
-    operationalState: String,
-    networkStatus: String,
+    operationalState: String, // Kept for button enablement logic
+    serverIpAddress: String?, // Now passed as a parameter
     port: Int,
     sharedDirectoryName: String,
     requireApprovalEnabled: Boolean,
@@ -476,7 +440,7 @@ fun ServerStatus(
     onStopClick: () -> Unit,
     onSelectSpecificFolderClick: () -> Unit,
     onApprovalToggleChange: (Boolean) -> Unit,
-    onHttpsToggleChange: (Boolean) -> Unit, // NEW: HTTPS toggle callback
+    onHttpsToggleChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isDirectorySelectedAndValid = sharedDirectoryName != "Not Selected" &&
@@ -502,27 +466,10 @@ fun ServerStatus(
         Text(
             text = "Project Noodle Server",
             style = MaterialTheme.typography.headlineSmall,
-            textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onBackground
         )
-
-        Spacer(Modifier.height(16.dp))
-
-        Text(
-            text = "Server Status:",
-            style = MaterialTheme.typography.bodySmall,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-        )
-        Text(
-            text = networkStatus,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 4.dp),
-            color = MaterialTheme.colorScheme.onBackground
-        )
-
-        if (operationalState == "Running" && networkStatus.contains("http://")) {
+        Spacer(Modifier.height(8.dp))
+        if (operationalState == "Running") {
             Text(
                 text = "(Requires device and browser on same Wi-Fi network)",
                 style = MaterialTheme.typography.bodySmall,
@@ -531,203 +478,183 @@ fun ServerStatus(
                  color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
             )
         }
-
+        Spacer(Modifier.height(8.dp))
+        if (operationalState == "Running" && serverIpAddress != null && port != -1) {
+             Text(
+                 text = "URL: ${if (useHttps) "https" else "http"}://${serverIpAddress}:${port}",
+                 style = MaterialTheme.typography.bodyMedium,
+                 textAlign = TextAlign.Center,
+                 modifier = Modifier.padding(top = 4.dp),
+                 color = MaterialTheme.colorScheme.onBackground
+             )
+         } else if (operationalState == "Running" && port != -1) {
+             Text(text = "Server running on port $port (No Wi-Fi IP detected)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
+         }
+        
          Spacer(Modifier.height(24.dp))
-
-         Text(
-             text = "Shared Directory:",
-             style = MaterialTheme.typography.bodySmall,
-             textAlign = TextAlign.Center,
-             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-         )
-         Text(
-             text = sharedDirectoryName,
-             style = MaterialTheme.typography.bodyMedium,
-             textAlign = TextAlign.Center,
-             modifier = Modifier.padding(top = 4.dp),
-             color = MaterialTheme.colorScheme.onBackground
-         )
-
-        Spacer(Modifier.height(16.dp))
-
-        Button(
-            onClick = onSelectSpecificFolderClick,
-            enabled = isSelectDirectoryEnabled
-        ) {
-            Text("Select Directory (SAF Picker)")
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(0.8f),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Require Connection Approval",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Switch(
-                checked = requireApprovalEnabled,
-                onCheckedChange = onApprovalToggleChange,
-                enabled = isApprovalToggleEnabled
-            )
-        }
-
-        // NEW: HTTPS Toggle
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(0.8f),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Use HTTPS (Self-Signed)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Switch(
-                checked = useHttps,
-                onCheckedChange = onHttpsToggleChange,
-                enabled = isApprovalToggleEnabled
-            )
-        }
-        // END NEW
-
-        Spacer(Modifier.height(16.dp))
-
-
-        Button(
-            onClick = onStartClick,
-            enabled = isStartEnabled
-        ) {
-            Text("Start Server")
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        Button(
-            onClick = onStopClick,
-            enabled = isStopEnabled
-        ) {
-            Text("Stop Server")
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-fun ServerStatusPreview() {
-    ProjectNoodleTheme(darkTheme = true) {
-        Surface(color = MaterialTheme.colorScheme.background) {
-             Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(16.dp)) {
-                ServerStatus(
-                    operationalState = "Running",
-                    networkStatus = "Dir: My Shared Folder\nApproval Not Required\nServer running:\nhttp://192.168.1.100:54321",
-                    port = 54321,
-                    sharedDirectoryName = "My Shared Folder",
-                    requireApprovalEnabled = false,
-                    useHttps = false, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
+ 
+          Text(
+              text = "Shared Directory:",
+              style = MaterialTheme.typography.bodySmall,
+              textAlign = TextAlign.Center,
+              color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+          )
+          Text(
+              text = sharedDirectoryName,
+              style = MaterialTheme.typography.bodyMedium,
+              textAlign = TextAlign.Center,
+              modifier = Modifier.padding(top = 4.dp),
+              color = MaterialTheme.colorScheme.onBackground
+          )
+ 
+         Spacer(Modifier.height(16.dp))
+ 
+         Button(
+             onClick = onSelectSpecificFolderClick,
+             enabled = isSelectDirectoryEnabled
+         ) {
+             Text("Select Directory (SAF Picker)")
+         }
+ 
+         Spacer(Modifier.height(16.dp))
+ 
+         Row(
+             modifier = Modifier.fillMaxWidth(0.8f),
+             horizontalArrangement = Arrangement.SpaceBetween,
+             verticalAlignment = Alignment.CenterVertically
+         ) {
+             Text(
+                 text = "Require Connection Approval",
+                 style = MaterialTheme.typography.bodyMedium,
+                 color = MaterialTheme.colorScheme.onBackground
+             )
+             Switch(
+                 checked = requireApprovalEnabled,
+                 onCheckedChange = onApprovalToggleChange,
+                 enabled = isApprovalToggleEnabled
+             )
+         }
+ 
+         // NEW: HTTPS Toggle
+         Spacer(Modifier.height(8.dp))
+         Row(
+             modifier = Modifier.fillMaxWidth(0.8f),
+             horizontalArrangement = Arrangement.SpaceBetween,
+             verticalAlignment = Alignment.CenterVertically
+         ) {
+             Text(
+                 text = "Use HTTPS (Self-Signed)",
+                 style = MaterialTheme.typography.bodyMedium,
+                 color = MaterialTheme.colorScheme.onBackground
+             )
+             Switch(
+                 checked = useHttps,
+                 onCheckedChange = onHttpsToggleChange,
+                 enabled = isApprovalToggleEnabled
+             )
+         }
+         // END NEW
+ 
+         Spacer(Modifier.height(16.dp))
+ 
+ 
+         Button(
+             onClick = onStartClick,
+             enabled = isStartEnabled
+         ) {
+             Text("Start Server")
+         }
+ 
+         Spacer(Modifier.height(8.dp))
+ 
+         Button(
+             onClick = onStopClick,
+             enabled = isStopEnabled
+         ) {
+             Text("Stop Server")
+         }
+     }
+ }
+ 
+ @Preview(showBackground = true)
+ @Composable
+ fun ServerStatusPreview() {
+     ProjectNoodleTheme(darkTheme = true) {
+         Surface(color = MaterialTheme.colorScheme.background) {
+              Column(verticalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(16.dp)) {
                  ServerStatus(
-                    operationalState = "Stopped",
-                    networkStatus = "Dir: My Shared Folder\nApproval Required\nServer Stopped.",
-                    port = -1,
-                    sharedDirectoryName = "My Shared Folder",
-                    requireApprovalEnabled = true,
-                    useHttps = true, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
-                  ServerStatus(
-                    operationalState = "Stopped",
-                    networkStatus = "Server is stopped.\nPlease select a directory.\nApproval Not Required",
-                    port = -1,
-                    sharedDirectoryName = "Not Selected",
-                    requireApprovalEnabled = false,
-                    useHttps = false, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
-                 ServerStatus(
-                    operationalState = "Starting",
-                    networkStatus = "Starting server...\nApproval Required",
-                    port = -1,
-                    sharedDirectoryName = "My Shared Folder",
-                    requireApprovalEnabled = true,
-                    useHttps = false, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
-                 ServerStatus(
-                    operationalState = "Requesting Permission",
-                    networkStatus = "Requesting notification permission...\nApproval Required",
-                    port = -1,
-                    sharedDirectoryName = "My Shared Folder",
-                    requireApprovalEnabled = true,
-                    useHttps = true, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
-                 ServerStatus(
-                    operationalState = "Failed: No Port Found",
-                    networkStatus = "Failed to start: No port available.\nApproval Not Required",
-                    port = -1,
+                    operationalState = "Running", // Simulating running state
+                    serverIpAddress = "192.168.1.100", // Preview IP address
+                     port = 54321,
                      sharedDirectoryName = "My Shared Folder",
-                    requireApprovalEnabled = false,
-                    useHttps = false, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
-                 ServerStatus(
-                    operationalState = "Running",
-                    networkStatus = "Dir: My Shared Folder\nApproval Required\nServer running on port 54321\n(No Wi-Fi IP)",
-                    port = 54321,
-                    sharedDirectoryName = "My Shared Folder",
-                    requireApprovalEnabled = true,
-                    useHttps = true, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
+                     requireApprovalEnabled = false,
+                     useHttps = false, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
                   ServerStatus(
-                    operationalState = "Stopped",
-                    networkStatus = "Directory selected: New Folder\n(Stop/Start server to apply)\nApproval Not Required",
-                    port = -1,
-                    sharedDirectoryName = "New Folder",
-                    requireApprovalEnabled = false,
-                    useHttps = false, // NEW: Preview values
-                    onStartClick = {},
-                    onStopClick = {},
-                    onSelectSpecificFolderClick = {},
-                    onApprovalToggleChange = {},
-                    onHttpsToggleChange = {}
-                )
-             }
-        }
-    }
-}
+                    operationalState = "Stopped", // Simulating stopped state
+                    serverIpAddress = null, // Preview IP address
+                     port = -1,
+                     sharedDirectoryName = "My Shared Folder",
+                     requireApprovalEnabled = true,
+                     useHttps = true, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
+                   ServerStatus(
+                    operationalState = "Stopped", // Simulating stopped state
+                    serverIpAddress = null, // Preview IP address
+                     port = -1,
+                     sharedDirectoryName = "Not Selected",
+                     requireApprovalEnabled = false,
+                     useHttps = false, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
+                  ServerStatus(
+                    operationalState = "Starting", // Simulating starting state
+                    serverIpAddress = null, // Preview IP address
+                     port = -1,
+                     sharedDirectoryName = "My Shared Folder",
+                     requireApprovalEnabled = true,
+                     useHttps = false, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
+                  ServerStatus(
+                    operationalState = "Requesting Permission", // Simulating permission request
+                    serverIpAddress = null, // Preview IP address
+                     port = -1,
+                     sharedDirectoryName = "My Shared Folder",
+                     requireApprovalEnabled = true,
+                     useHttps = true, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
+                  ServerStatus(
+                    operationalState = "Failed: No Port Found", // Simulating failure
+                    serverIpAddress = null, // Preview IP address
+                     port = -1,
+                      sharedDirectoryName = "My Shared Folder",
+                     requireApprovalEnabled = false,
+                     useHttps = false, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
+                  ServerStatus(
+                    operationalState = "Running",
+                    serverIpAddress = null, // No IP detected in preview
+                     port = 54321,
+                     sharedDirectoryName = "My Shared Folder",
+                     requireApprovalEnabled = true,
+                     useHttps = true, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
+                   ServerStatus(
+                    operationalState = "Stopped", // Simulating stopped state
+                    serverIpAddress = null, // Preview IP address
+                     port = -1,
+                     sharedDirectoryName = "New Folder",
+                     requireApprovalEnabled = false,
+                     useHttps = false, // NEW: Preview values
+                     onStartClick = {}, onStopClick = {}, onSelectSpecificFolderClick = {}, onApprovalToggleChange = {}, onHttpsToggleChange = {}
+                 )
+              }
+         }
+     }
+ }
