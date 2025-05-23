@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.projectnoodle"
+    namespace = "com.github.fixingthingsenjoyer.projectnoodle"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.projectnoodle"
+        applicationId = "com.github.fixingthingsenjoyer.projectnoodle"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

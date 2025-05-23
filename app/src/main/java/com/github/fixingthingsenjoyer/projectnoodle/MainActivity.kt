@@ -1,4 +1,4 @@
-package com.example.projectnoodle
+package com.github.fixingthingsenjoyer.projectnoodle
 
 import android.Manifest
 import android.content.BroadcastReceiver
@@ -42,7 +42,7 @@ import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
-import com.example.projectnoodle.ui.theme.ProjectNoodleTheme
+import com.github.fixingthingsenjoyer.projectnoodle.ui.theme.ProjectNoodleTheme
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
 
@@ -238,7 +238,9 @@ class MainActivity : ComponentActivity() {
         return object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == ACTION_SERVER_STATUS_UPDATE) {
-                    Log.d(TAG, "MainActivity: Received status update broadcast. (HTTPS: ${intent.getBooleanExtra(EXTRA_USE_HTTPS, false)})")
+                    Log.d(
+                        TAG, "MainActivity: Received status update broadcast. (HTTPS: ${intent.getBooleanExtra(
+                            EXTRA_USE_HTTPS, false)})")
                     val isRunning = intent.getBooleanExtra(EXTRA_SERVER_IS_RUNNING, false)
                     val opState = intent.getStringExtra(EXTRA_SERVER_OPERATIONAL_STATE) ?: "Unknown"
                     val ipAddress = intent.getStringExtra(EXTRA_SERVER_IP)

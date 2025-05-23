@@ -1,4 +1,4 @@
-package com.example.projectnoodle
+package com.github.fixingthingsenjoyer.projectnoodle
 
 import org.junit.Test
 

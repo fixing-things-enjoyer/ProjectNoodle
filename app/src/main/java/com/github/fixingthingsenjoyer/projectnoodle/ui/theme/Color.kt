@@ -1,4 +1,4 @@
-package com.example.projectnoodle.ui.theme
+package com.github.fixingthingsenjoyer.projectnoodle.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

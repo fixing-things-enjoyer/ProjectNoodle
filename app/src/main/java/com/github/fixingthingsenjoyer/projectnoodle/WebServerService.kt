@@ -1,4 +1,4 @@
-package com.example.projectnoodle
+package com.github.fixingthingsenjoyer.projectnoodle
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -29,26 +29,26 @@ private const val FAILURE_NOTIFICATION_ID = 2
 
 const val APPROVAL_CHANNEL_ID = "project_noodle_approval_channel"
 const val APPROVAL_NOTIFICATION_ID = 3
-const val ACTION_APPROVE_CLIENT = "com.example.projectnoodle.APPROVE_CLIENT"
-const val ACTION_REJECT_CLIENT = "com.example.projectnoodle.REJECT_CLIENT"
-const val EXTRA_CLIENT_IP_FOR_APPROVAL = "com.example.projectnoodle.CLIENT_IP_FOR_APPROVAL"
+const val ACTION_APPROVE_CLIENT = "com.github.com.github.fixingthingsenjoyer.projectnoodle.APPROVE_CLIENT"
+const val ACTION_REJECT_CLIENT = "com.github.com.github.fixingthingsenjoyer.projectnoodle.REJECT_CLIENT"
+const val EXTRA_CLIENT_IP_FOR_APPROVAL = "com.github.com.github.fixingthingsenjoyer.projectnoodle.CLIENT_IP_FOR_APPROVAL"
 
-const val ACTION_START_SERVER = "com.example.projectnoodle.START_SERVER"
-const val ACTION_STOP_SERVER = "com.example.projectnoodle.STOP_SERVER"
-const val ACTION_SERVER_STATUS_UPDATE = "com.example.projectnoodle.SERVER_STATUS_UPDATE"
-const val ACTION_QUERY_STATUS = "com.example.projectnoodle.QUERY_STATUS"
+const val ACTION_START_SERVER = "com.github.com.github.fixingthingsenjoyer.projectnoodle.START_SERVER"
+const val ACTION_STOP_SERVER = "com.github.com.github.fixingthingsenjoyer.projectnoodle.STOP_SERVER"
+const val ACTION_SERVER_STATUS_UPDATE = "com.github.com.github.fixingthingsenjoyer.projectnoodle.SERVER_STATUS_UPDATE"
+const val ACTION_QUERY_STATUS = "com.github.com.github.fixingthingsenjoyer.projectnoodle.QUERY_STATUS"
 
 
-const val EXTRA_SHARED_DIRECTORY_URI = "com.example.projectnoodle.SHARED_DIRECTORY_URI"
-const val EXTRA_REQUIRE_APPROVAL = "com.example.projectnoodle.REQUIRE_APPROVAL"
-const val EXTRA_USE_HTTPS = "com.example.projectnoodle.USE_HTTPS"
+const val EXTRA_SHARED_DIRECTORY_URI = "com.github.com.github.fixingthingsenjoyer.projectnoodle.SHARED_DIRECTORY_URI"
+const val EXTRA_REQUIRE_APPROVAL = "com.github.com.github.fixingthingsenjoyer.projectnoodle.REQUIRE_APPROVAL"
+const val EXTRA_USE_HTTPS = "com.github.com.github.fixingthingsenjoyer.projectnoodle.USE_HTTPS"
 
-const val EXTRA_SERVER_IS_RUNNING = "com.example.projectnoodle.IS_RUNNING"
-const val EXTRA_SERVER_OPERATIONAL_STATE = "com.example.projectnoodle.OPERATIONAL_STATE"
-const val EXTRA_SERVER_STATUS_MESSAGE = "com.example.projectnoodle.STATUS_MESSAGE"
-const val EXTRA_SERVER_IP = "com.example.projectnoodle.SERVER_IP"
-const val EXTRA_SERVER_PORT = "com.example.projectnoodle.SERVER_PORT"
-const val EXTRA_SHARED_DIRECTORY_NAME = "com.example.projectnoodle.SHARED_DIRECTORY_NAME"
+const val EXTRA_SERVER_IS_RUNNING = "com.github.com.github.fixingthingsenjoyer.projectnoodle.IS_RUNNING"
+const val EXTRA_SERVER_OPERATIONAL_STATE = "com.github.com.github.fixingthingsenjoyer.projectnoodle.OPERATIONAL_STATE"
+const val EXTRA_SERVER_STATUS_MESSAGE = "com.github.com.github.fixingthingsenjoyer.projectnoodle.STATUS_MESSAGE"
+const val EXTRA_SERVER_IP = "com.github.com.github.fixingthingsenjoyer.projectnoodle.SERVER_IP"
+const val EXTRA_SERVER_PORT = "com.github.com.github.fixingthingsenjoyer.projectnoodle.SERVER_PORT"
+const val EXTRA_SHARED_DIRECTORY_NAME = "com.github.com.github.fixingthingsenjoyer.projectnoodle.SHARED_DIRECTORY_NAME"
 
 const val PREF_REQUIRE_APPROVAL = "pref_require_approval"
 const val PREF_USE_HTTPS = "pref_use_https"

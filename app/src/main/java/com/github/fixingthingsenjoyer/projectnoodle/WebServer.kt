@@ -1,5 +1,5 @@
-// File: app/src/main/java/com/example/projectnoodle/WebServer.kt
-package com.example.projectnoodle
+// File: app/src/main/java/com/github/com.github.fixingthingsenjoyer.projectnoodle/WebServer.kt
+package com.github.fixingthingsenjoyer.projectnoodle
 
 import android.content.Context
 import android.net.Uri
