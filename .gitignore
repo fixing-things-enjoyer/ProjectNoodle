@@ -15,3 +15,4 @@
 local.properties
 .idea
 project_contents.txt
+.env

@@ -1,0 +1,85 @@
+# .github/workflows/android-release.yml
+
+name: Android Release Build
+
+on:
+  push:
+    tags:
+      - 'v*.*.*' # Trigger when a new tag like v1.0.0 is pushed
+
+jobs:
+  build_and_release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # To create a GitHub Release
+      packages: write # If you ever want to publish to GitHub Packages (e.g., for libraries)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17' # Android Gradle Plugin 8.x and Kotlin 2.x often prefer JDK 17+
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Decode Keystore
+        # This step decodes your base64-encoded keystore file from GitHub Secrets
+        # It's crucial for signing your release APK.
+        run: |
+          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 --decode > app/release-key.jks
+          echo "Keystore file decoded to app/release-key.jks"
+        env:
+          SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+
+      - name: Set up Signing Environment Variables
+        # These environment variables will be picked up by your build.gradle.kts
+        run: |
+          echo "KEY_ALIAS=${{ secrets.SIGNING_KEY_ALIAS }}" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=${{ secrets.SIGNING_KEY_PASSWORD }}" >> $GITHUB_ENV
+          echo "STORE_PASSWORD=${{ secrets.SIGNING_STORE_PASSWORD }}" >> $GITHUB_ENV
+          echo "STORE_FILE=$(pwd)/app/release-key.jks" >> $GITHUB_ENV
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        # This command builds the release version of your application.
+        # It will automatically pick up the signing configuration from build.gradle.kts
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK artifact
+        # This action uploads the built APK to the workflow run, so you can download it later.
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-noodle-release-apk
+          path: app/build/outputs/apk/release/*.apk # Adjust path if you build AAB instead
+
+      - name: Create GitHub Release
+        # This action creates a new release on your GitHub repository.
+        # The APK artifact will be attached to this release.
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') # Only create release if triggered by a tag
+        with:
+          tag_name: ${{ github.ref_name }} # e.g., v1.0.0
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Project Noodle Release ${{ github.ref_name }}
+
+            This release includes:
+            - Latest features and bug fixes.
+
+            Full changelog to be added here.
+          draft: false
+          prerelease: false
+          files: app/build/outputs/apk/release/*.apk # Attach the APK
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is automatically provided by GitHub

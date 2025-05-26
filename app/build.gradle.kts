@@ -1,4 +1,6 @@
+// ProjectNoodle/app/build.gradle.kts
 import org.gradle.api.JavaVersion
+import org.gradle.api.GradleException
 
 plugins {
     alias(libs.plugins.android.application)
@@ -20,6 +22,75 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            // Prioritize: GitHub Actions Environment Variables > Manually parsed .env file (local)
+            // This ensures CI/CD can inject secrets via env vars, and local dev uses .env.
+
+            // Helper function to safely get a property
+            fun getSecret(key: String): String? {
+                // 1. Try from System Environment Variables (for CI/CD)
+                val envValue = System.getenv(key)
+                if (!envValue.isNullOrEmpty()) return envValue
+
+                // 2. Try from rootProject.extra (manually parsed .env for local dev)
+                // Note: rootProject.extra.properties is a map, so we can use `get`
+                val extraValue = rootProject.extra.properties[key] as? String
+                if (!extraValue.isNullOrEmpty()) return extraValue
+
+                return null
+            }
+
+            // Keystore file path
+            val finalStoreFilePath = getSecret("STORE_FILE")
+            if (finalStoreFilePath.isNullOrEmpty()) {
+                throw GradleException(
+                    "Signing key store file not specified for 'release' build. " +
+                            "Please set 'STORE_FILE' environment variable (for CI/CD) " +
+                            "or in your local .env file."
+                )
+            }
+            this.storeFile = file(finalStoreFilePath)
+
+
+            // Key Alias
+            val finalKeyAlias = getSecret("KEY_ALIAS")
+            if (finalKeyAlias.isNullOrEmpty()) {
+                throw GradleException(
+                    "Signing key alias not specified for 'release' build. " +
+                            "Please set 'KEY_ALIAS' environment variable (for CI/CD) " +
+                            "or in your local .env file."
+                )
+            }
+            this.keyAlias = finalKeyAlias
+
+
+            // Key Password
+            val finalKeyPassword = getSecret("KEY_PASSWORD")
+            if (finalKeyPassword.isNullOrEmpty()) {
+                throw GradleException(
+                    "Signing key password not specified for 'release' build. " +
+                            "Please set 'KEY_PASSWORD' environment variable (for CI/CD) " +
+                            "or in your local .env file."
+                )
+            }
+            this.keyPassword = finalKeyPassword
+
+
+            // Store Password
+            val finalStorePassword = getSecret("STORE_PASSWORD")
+            if (finalStorePassword.isNullOrEmpty()) {
+                throw GradleException(
+                    "Signing store password not specified for 'release' build. " +
+                            "Please set 'STORE_PASSWORD' environment variable (for CI/CD) " +
+                            "or in your local .env file."
+                )
+            }
+            this.storePassword = finalStorePassword
+        }
+    }
+
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -27,6 +98,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
