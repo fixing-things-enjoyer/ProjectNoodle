@@ -1,35 +1,18 @@
 [versions]
-# Keep core AndroidX versions needed outside Compose BOM
 agp = "8.10.0"
-kotlin = "2.0.21"
-coreKtx = "1.10.1"
-lifecycleRuntimeKtx = "2.6.1"
-appcompat = "1.7.0"
-
-# Testing
+kotlin = "2.1.21"
+coreKtx = "1.16.0"
+lifecycle = "2.9.1"
+activityCompose = "1.10.1"
+composeBom = "2025.05.01"
 junit = "4.13.2"
-junitVersion = "1.1.5"
-espressoCore = "3.5.1"
-
-# Compose BOM
-composeBom = "2024.09.00"
-
-# Activity Compose
-activityCompose = "1.8.0"
-
-# NanoHTTPD
+junitVersion = "1.2.1"
+espressoCore = "3.6.1"
 nanohttpd = "2.3.1"
-
-# Storage Access Framework / DocumentFile
-documentFile = "1.0.1"
-
-# JSON library
-orgjson = "20231013"
-
-localbroadcastmanager = "1.1.0"
-preferenceKtx = "1.2.1"
+documentFile = "1.1.0"
 material = "1.12.0"
-bouncyCastle = "1.70" # NEW: Bouncy Castle version
+bouncyCastle = "1.83"
+zxing = "3.5.3"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -37,41 +20,25 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 
 [libraries]
-# Core AndroidX
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
-androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
-androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
-
-# Activity Compose
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
-
-# Compose BOM
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
-# Dependencies managed by the BOM
 androidx-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
 androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
-androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test.junit4" }
+androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
-
-# Testing
+androidx-material-icons = { group = "androidx.compose.material", name = "material-icons-extended" }
+androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
-
-# NanoHTTPD
 nanohttpd = { module = "org.nanohttpd:nanohttpd", version.ref = "nanohttpd" }
-
-# Storage Access Framework / DocumentFile
-androidx-documentfile = { group = "androidx.documentfile", name = "documentfile", version.ref = "documentFile" }
-
-# JSON library
-orgjson = { module = "org.json:json", version.ref = "orgjson" }
-
-androidx-localbroadcastmanager = { group = "androidx.localbroadcastmanager", name = "localbroadcastmanager", version.ref = "localbroadcastmanager" }
-androidx-preference-ktx = { group = "androidx.preference", name = "preference-ktx", version.ref = "preferenceKtx" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
-bouncy-castle-prov = { group = "org.bouncycastle", name = "bcprov-jdk15on", version.ref = "bouncyCastle" } # NEW: Bouncy Castle Provider
-bouncy-castle-pkix = { group = "org.bouncycastle", name = "bcpkix-jdk15on", version.ref = "bouncyCastle" } # NEW: Bouncy Castle PKIX for X.509
+bouncy-castle-prov = { group = "org.bouncycastle", name = "bcprov-jdk18on", version.ref = "bouncyCastle" }
+bouncy-castle-pkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "bouncyCastle" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }

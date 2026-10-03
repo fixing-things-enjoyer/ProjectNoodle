@@ -1,78 +1,85 @@
 package com.github.fixingthingsenjoyer.projectnoodle.ui.theme
 
-import android.app.Activity
 import android.os.Build
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
-import androidx.core.view.WindowCompat
+import androidx.compose.ui.unit.dp
 
-private val DarkColorScheme = darkColorScheme(
-    primary = TokyoNightPrimary,
-    onPrimary = TokyoNightOnPrimary,
-    primaryContainer = TokyoNightPrimaryContainer,
-    onPrimaryContainer = TokyoNightOnPrimaryContainer,
-    secondary = TokyoNightSecondary,
-    onSecondary = TokyoNightOnSecondary,
-    secondaryContainer = TokyoNightSecondaryContainer,
-    onSecondaryContainer = TokyoNightOnSecondaryContainer,
-    tertiary = TokyoNightTertiary,
-    onTertiary = TokyoNightOnTertiary,
-    tertiaryContainer = TokyoNightTertiaryContainer,
-    onTertiaryContainer = TokyoNightOnTertiaryContainer,
-    background = TokyoNightBackground,
-    onBackground = TokyoNightOnBackground,
-    surface = TokyoNightSurface,
-    onSurface = TokyoNightOnSurface,
-    surfaceVariant = TokyoNightSurfaceVariant,
-    onSurfaceVariant = TokyoNightOnSurfaceVariant,
-    error = TokyoNightError,
-    onError = TokyoNightOnError
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-    // You can define a "light Tokyo Night" palette here if you plan to support light theme
-)
+private val LightColors =
+    lightColorScheme(
+        primary = NoodleViolet,
+        onPrimary = Color.White,
+        primaryContainer = NoodleLavender,
+        onPrimaryContainer = Color(0xFF25105D),
+        secondary = Color(0xFF52634F),
+        onSecondary = Color.White,
+        secondaryContainer = Color(0xFFD5E8CE),
+        onSecondaryContainer = Color(0xFF142011),
+        tertiary = Color(0xFF79546D),
+        tertiaryContainer = Color(0xFFFFD8EE),
+        onTertiaryContainer = Color(0xFF301126),
+        background = NoodlePaper,
+        onBackground = NoodleInk,
+        surface = NoodlePaper,
+        onSurface = NoodleInk,
+        surfaceContainerLow = Color(0xFFF5F0FA),
+        surfaceContainer = Color(0xFFEFEAF4),
+        surfaceContainerHigh = Color(0xFFEAE4EF),
+        onSurfaceVariant = NoodleMuted,
+        outline = Color(0xFF7B7485),
+        outlineVariant = Color(0xFFCCC4D6),
+    )
+private val DarkColors =
+    darkColorScheme(
+        primary = Color(0xFFCEBEFF),
+        onPrimary = Color(0xFF36216F),
+        primaryContainer = Color(0xFF4E3894),
+        onPrimaryContainer = NoodleLavender,
+        secondary = Color(0xFFB9CCB3),
+        secondaryContainer = Color(0xFF3B4B38),
+        onSecondaryContainer = Color(0xFFD5E8CE),
+        tertiary = Color(0xFFEBB9D6),
+        tertiaryContainer = Color(0xFF5F3D54),
+        onTertiaryContainer = Color(0xFFFFD8EE),
+        background = NoodleDark,
+        onBackground = Color(0xFFE8E0EF),
+        surface = NoodleDark,
+        onSurface = Color(0xFFE8E0EF),
+        surfaceContainerLow = Color(0xFF1D1925),
+        surfaceContainer = Color(0xFF231F2B),
+        surfaceContainerHigh = Color(0xFF2E2936),
+        onSurfaceVariant = Color(0xFFCDC3D8),
+        outline = Color(0xFF968DA2),
+        outlineVariant = Color(0xFF494152),
+    )
 
 @Composable
 fun ProjectNoodleTheme(
-    darkTheme: Boolean = true, // Your app defaults to dark theme
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = false,
-    content: @Composable () -> Unit
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    val colors =
+        when {
+            dynamicColor && Build.VERSION.SDK_INT >= 31 ->
+                if (darkTheme) dynamicDarkColorScheme(LocalContext.current)
+                else dynamicLightColorScheme(LocalContext.current)
+            darkTheme -> DarkColors
+            else -> LightColors
         }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        SideEffect {
-            val window = (view.context as Activity).window
-            // Setting status bar color to match the background color for a cohesive Tokyo Night look
-            window.statusBarColor = colorScheme.background.toArgb()
-            // Adjusting status bar icons color based on whether the theme is light or dark
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
-        }
-    }
-
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = colors,
         typography = Typography,
-        content = content
+        shapes =
+            Shapes(
+                small = RoundedCornerShape(12.dp),
+                medium = RoundedCornerShape(18.dp),
+                large = RoundedCornerShape(24.dp),
+            ),
+        content = content,
     )
 }

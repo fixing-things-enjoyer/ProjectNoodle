@@ -16,3 +16,14 @@ local.properties
 .idea
 project_contents.txt
 .env
+
+# Generated web UI assets are built by Gradle; never copy dist files by hand.
+webui/node_modules/
+webui/dist/
+webui/test-results/
+webui/playwright-report/
+webui/*.tsbuildinfo
+app/build/
+*.jks
+*.keystore
+.kotlin/

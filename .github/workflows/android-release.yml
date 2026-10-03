@@ -1,85 +1,67 @@
-# .github/workflows/android-release.yml
-
-name: Android Release Build
+name: Release APK
 
 on:
   push:
-    tags:
-      - 'v*.*.*' # Trigger when a new tag like v1.0.0 is pushed
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build_and_release:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: checks
     runs-on: ubuntu-latest
-
     permissions:
-      contents: write # To create a GitHub Release
-      packages: write # If you ever want to publish to GitHub Packages (e.g., for libraries)
-
+      contents: write
+    env:
+      KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+      STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17' # Android Gradle Plugin 8.x and Kotlin 2.x often prefer JDK 17+
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Decode Keystore
-        # This step decodes your base64-encoded keystore file from GitHub Secrets
-        # It's crucial for signing your release APK.
-        run: |
-          echo "${{ secrets.SIGNING_KEYSTORE_BASE64 }}" | base64 --decode > app/release-key.jks
-          echo "Keystore file decoded to app/release-key.jks"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Validate release version and signing secrets
         env:
           SIGNING_KEYSTORE_BASE64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
-
-      - name: Set up Signing Environment Variables
-        # These environment variables will be picked up by your build.gradle.kts
         run: |
-          echo "KEY_ALIAS=${{ secrets.SIGNING_KEY_ALIAS }}" >> $GITHUB_ENV
-          echo "KEY_PASSWORD=${{ secrets.SIGNING_KEY_PASSWORD }}" >> $GITHUB_ENV
-          echo "STORE_PASSWORD=${{ secrets.SIGNING_STORE_PASSWORD }}" >> $GITHUB_ENV
-          echo "STORE_FILE=$(pwd)/app/release-key.jks" >> $GITHUB_ENV
-        env:
-          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build Release APK
-        # This command builds the release version of your application.
-        # It will automatically pick up the signing configuration from build.gradle.kts
-        run: ./gradlew assembleRelease
-
-      - name: Upload APK artifact
-        # This action uploads the built APK to the workflow run, so you can download it later.
-        uses: actions/upload-artifact@v4
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || { echo 'Use a vMAJOR.MINOR.PATCH tag; each component must be 0–999.'; exit 1; }
+          for secret_name in KEY_ALIAS KEY_PASSWORD STORE_PASSWORD SIGNING_KEYSTORE_BASE64; do
+            [[ -n "${!secret_name}" ]] || { echo "Missing release secret: $secret_name"; exit 1; }
+          done
+          printf '%s' "$SIGNING_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/noodle-release.jks"
+          chmod 600 "$RUNNER_TEMP/noodle-release.jks"
+          echo "STORE_FILE=$RUNNER_TEMP/noodle-release.jks" >> "$GITHUB_ENV"
+          echo "NOODLE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          name: project-noodle-release-apk
-          path: app/build/outputs/apk/release/*.apk # Adjust path if you build AAB instead
-
-      - name: Create GitHub Release
-        # This action creates a new release on your GitHub repository.
-        # The APK artifact will be attached to this release.
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/') # Only create release if triggered by a tag
+          node-version: '24'
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
-          tag_name: ${{ github.ref_name }} # e.g., v1.0.0
-          name: Release ${{ github.ref_name }}
-          body: |
-            ## Project Noodle Release ${{ github.ref_name }}
-
-            This release includes:
-            - Latest features and bug fixes.
-
-            Full changelog to be added here.
-          draft: false
-          prerelease: false
-          files: app/build/outputs/apk/release/*.apk # Attach the APK
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+      - run: ./gradlew assembleRelease --console=plain
+      - name: Verify signature and prepare download
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+          mkdir release
+          cp app/build/outputs/apk/release/app-release.apk "release/ProjectNoodle-${NOODLE_VERSION}.apk"
+          cd release
+          sha256sum "ProjectNoodle-${NOODLE_VERSION}.apk" > SHA256SUMS
+      - name: Publish GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is automatically provided by GitHub
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/*.apk release/SHA256SUMS --verify-tag --title "Project Noodle ${NOODLE_VERSION}" --generate-notes
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/noodle-release.jks"

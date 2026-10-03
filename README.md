@@ -1,38 +1,61 @@
 # Project Noodle
 
-<img src="app/src/main/assets/project_noodle.png" alt="Project Noodle Icon" width="100">
+Move files between your Android phone and another device using the same Wi-Fi and a browser. No account or cloud storage.
 
-Project Noodle turns your Android device into a simple file server, accessible via a web browser on your local network.
+[Download the latest APK](https://github.com/fixing-things-enjoyer/ProjectNoodle/releases/latest)
 
-## Features
-- Share files and folders from your Android device.
-- Web interface for browsing, uploading, downloading, renaming, deleting, and creating folders.
-- Access from any device on the same Wi-Fi network.
-- Optional connection approval via notifications.
-- Optional HTTPS with self-signed certificates (requires browser trust bypass).
-- Runs as a foreground service for reliability.
+## Three steps
 
-## Getting Started
-1. Open Project Noodle ([grab latest apk here](https://github.com/fixing-things-enjoyer/ProjectNoodle/releases)).
-2. Select a directory to share (uses [SAF](https://developer.android.com/guide/topics/providers/document-provider)).
-3. (Optional) Enable connection approval or HTTPS.
-4. Start the server to get a URL (e.g., `http://192.168.1.100:54321`).
-5. Access the URL in a browser on the same Wi-Fi.
-6. Approve connections if enabled.
-7. Manage files via the browser (can optionally drag/drop files onto webui to upload).
-8. Stop the server when done.
+1. **Choose a folder** on your phone.
+2. Tap **Start sharing**.
+3. Open the displayed address on your other device, or scan the QR code.
 
-## Built With
-- Kotlin
-- Android Jetpack Compose
-- NanoHTTPD
-- Bouncy Castle (for HTTPS)
+Click a file to download. Upload files using the button or drag and drop. Search, create folders, rename and delete from the browser. Changes apply to the shared files on your phone. Tap **Stop sharing** when finished.
 
-## Contributing
-Open issues or pull requests are welcome.
+Both devices must use the same Wi-Fi, or connect the other device to your phone's hotspot. Some guest Wi-Fi networks prevent devices from reaching each other.
+
+## Made for your devices
+
+- Android Material 3 interface, system light/dark theme and wallpaper colors.
+- Copy, share or scan your connection address.
+- Responsive React file browser with list/grid views and light/dark themes.
+- Upload queue, progress, cancellation and clear errors.
+- Optional device approval, available in the app and notifications.
+- Optional HTTPS under Sharing options. It uses a local self-signed certificate, so your browser shows a certificate warning.
+- Read-only folders supported; existing files are never silently overwritten.
+
+## Preview
+
+Browser previews use example files from the test suite. Android previews were captured from the built app. See the [actual Android-hosted browser](docs/screenshots/web-hosted.png) too.
+
+![Web UI](docs/screenshots/web-light.png)
+
+<img src="docs/screenshots/android-start.png" alt="Android sharing screen" width="300">
+<img src="docs/screenshots/android-sharing.png" alt="Android sharing an accessible folder" width="300">
+
+## Build
+
+The Android app and React UI live in this repository. No sibling checkout or manual asset copying is needed. Install Java 17, Node 24 and Android SDK 35, then run:
+
+```bash
+./gradlew assembleDebug
+```
+
+APK: `app/build/outputs/apk/debug/app-debug.apk`. Gradle installs the locked npm dependencies and builds the embedded UI automatically.
+
+| Directory | Contents |
+| --- | --- |
+| `app/` | Android app, foreground sharing service, HTTP/HTTPS server, tests |
+| `webui/` | React source, styles, npm lockfile, browser and accessibility tests |
+| `.github/workflows/` | Automatic checks, downloadable debug APKs, signed tagged releases |
+| `docs/` | Architecture, development and release instructions |
+
+See [architecture and migration](docs/architecture.md) and [development and releases](docs/releases.md).
+
+## Release
+
+Push a version tag such as `v2.0.0`. GitHub runs all checks, builds and verifies a signed APK, then publishes it with a checksum and release notes. Existing signing secret names remain supported.
 
 ## License
-Apache License 2.0 (see `LICENSE`).
 
-## Author
-fixingthingsenjoyer
+Apache 2.0. See [LICENSE](LICENSE).

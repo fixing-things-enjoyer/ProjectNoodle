@@ -1,179 +1,137 @@
-// ProjectNoodle/app/build.gradle.kts
-import org.gradle.api.JavaVersion
-import org.gradle.api.GradleException
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
 
+// One version for the APK. Release tags override this value in CI.
+val noodleVersion =
+    providers
+        .environmentVariable("NOODLE_VERSION")
+        .orElse(providers.gradleProperty("noodleVersion"))
+        .get()
+val versionParts =
+    Regex("^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$").matchEntire(noodleVersion)
+        ?: throw GradleException("NOODLE_VERSION must be major.minor.patch (each part 0–999).")
+
+val (major, minor, patch) = versionParts.groupValues.drop(1).map(String::toInt)
+
+fun signingSecret(name: String): String? =
+    System.getenv(name)?.takeIf(String::isNotBlank)
+        ?: (rootProject.extra.properties[name] as? String)?.takeIf(String::isNotBlank)
+
+val signingValues =
+    listOf("STORE_FILE", "KEY_ALIAS", "KEY_PASSWORD", "STORE_PASSWORD")
+        .associateWith(::signingSecret)
+val hasSigning = signingValues.values.all { it != null }
+
+val webUiDirectory = rootProject.layout.projectDirectory.dir("webui")
+val installWebUi by
+    tasks.registering(Exec::class) {
+        group = "build"
+        description = "Install the locked web UI dependencies."
+        workingDir(webUiDirectory)
+        inputs.files(webUiDirectory.file("package.json"), webUiDirectory.file("package-lock.json"))
+        outputs.dir(webUiDirectory.dir("node_modules"))
+        commandLine(
+            if (System.getProperty("os.name").startsWith("Windows")) "npm.cmd" else "npm",
+            "ci",
+            "--no-audit",
+            "--no-fund",
+        )
+    }
+val buildWebUi by
+    tasks.registering(Exec::class) {
+        group = "build"
+        description = "Build React assets bundled into every APK."
+        dependsOn(installWebUi)
+        workingDir(webUiDirectory)
+        inputs.dir(webUiDirectory.dir("src"))
+        inputs.files(
+            webUiDirectory.file("index.html"),
+            webUiDirectory.file("package-lock.json"),
+            webUiDirectory.file("vite.config.ts"),
+            webUiDirectory.file("tsconfig.json"),
+        )
+        outputs.dir(webUiDirectory.dir("dist"))
+        commandLine(
+            if (System.getProperty("os.name").startsWith("Windows")) "npm.cmd" else "npm",
+            "run",
+            "build",
+        )
+    }
+
 android {
     namespace = "com.github.fixingthingsenjoyer.projectnoodle"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "com.github.fixingthingsenjoyer.projectnoodle"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
-
+        versionName = noodleVersion
+        versionCode = major * 1_000_000 + minor * 1_000 + patch
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-
-    signingConfigs {
-        create("release") {
-            // Prioritize: GitHub Actions Environment Variables > Manually parsed .env file (local)
-            // This ensures CI/CD can inject secrets via env vars, and local dev uses .env.
-
-            // Helper function to safely get a property
-            fun getSecret(key: String): String? {
-                // 1. Try from System Environment Variables (for CI/CD)
-                val envValue = System.getenv(key)
-                if (!envValue.isNullOrEmpty()) return envValue
-
-                // 2. Try from rootProject.extra (manually parsed .env for local dev)
-                // Note: rootProject.extra.properties is a map, so we can use `get`
-                val extraValue = rootProject.extra.properties[key] as? String
-                if (!extraValue.isNullOrEmpty()) return extraValue
-
-                return null
-            }
-
-            // Keystore file path
-            val finalStoreFilePath = getSecret("STORE_FILE")
-            if (finalStoreFilePath.isNullOrEmpty()) {
-                throw GradleException(
-                    "Signing key store file not specified for 'release' build. " +
-                            "Please set 'STORE_FILE' environment variable (for CI/CD) " +
-                            "or in your local .env file."
-                )
-            }
-            this.storeFile = file(finalStoreFilePath)
-
-
-            // Key Alias
-            val finalKeyAlias = getSecret("KEY_ALIAS")
-            if (finalKeyAlias.isNullOrEmpty()) {
-                throw GradleException(
-                    "Signing key alias not specified for 'release' build. " +
-                            "Please set 'KEY_ALIAS' environment variable (for CI/CD) " +
-                            "or in your local .env file."
-                )
-            }
-            this.keyAlias = finalKeyAlias
-
-
-            // Key Password
-            val finalKeyPassword = getSecret("KEY_PASSWORD")
-            if (finalKeyPassword.isNullOrEmpty()) {
-                throw GradleException(
-                    "Signing key password not specified for 'release' build. " +
-                            "Please set 'KEY_PASSWORD' environment variable (for CI/CD) " +
-                            "or in your local .env file."
-                )
-            }
-            this.keyPassword = finalKeyPassword
-
-
-            // Store Password
-            val finalStorePassword = getSecret("STORE_PASSWORD")
-            if (finalStorePassword.isNullOrEmpty()) {
-                throw GradleException(
-                    "Signing store password not specified for 'release' build. " +
-                            "Please set 'STORE_PASSWORD' environment variable (for CI/CD) " +
-                            "or in your local .env file."
-                )
-            }
-            this.storePassword = finalStorePassword
+    if (hasSigning)
+        signingConfigs.create("release") {
+            storeFile = file(signingValues.getValue("STORE_FILE")!!)
+            keyAlias = signingValues.getValue("KEY_ALIAS")
+            keyPassword = signingValues.getValue("KEY_PASSWORD")
+            storePassword = signingValues.getValue("STORE_PASSWORD")
         }
-    }
-
-
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "1.8"
-        languageVersion = "1.9"
-        apiVersion = "1.9"
-    }
-    buildFeatures {
-        compose = true
-    }
-
-    packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "META-INF/INDEX.LIST"
-            excludes += "META-INF/DEPENDENCIES"
-            excludes += "META-INF/LICENSE"
-            excludes += "META-INF/LICENSE.txt"
-            excludes += "META-INF/LICENSE.md"
-            excludes += "META-INF/NOTICE"
-            excludes += "META-INF/NOTICE.txt"
-            excludes += "META-INF/NOTICE.md"
-            excludes += "META-INF/ASL2.0"
-            excludes += "META-INF/*.kotlin_module"
-            excludes += "kotlin/**"
-            excludes += "**/*.kotlin_metadata"
-            excludes += "**/*.kotlin_builtins"
-        }
-    }
+    kotlinOptions { jvmTarget = "17" }
+    buildFeatures { compose = true }
+    sourceSets.getByName("main").assets.srcDir(webUiDirectory.dir("dist"))
+    packaging.resources.excludes +=
+        setOf(
+            "/META-INF/{AL2.0,LGPL2.1}",
+            "META-INF/INDEX.LIST",
+            "META-INF/DEPENDENCIES",
+            "META-INF/LICENSE*",
+            "META-INF/NOTICE*",
+            "META-INF/versions/**/OSGI-INF/MANIFEST.MF",
+        )
 }
 
+tasks.named("preBuild") { dependsOn(buildWebUi) }
+
+// Debug builds and tests work without release signing keys. CI requires signing before publishing.
 dependencies {
-    // Core AndroidX
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.appcompat)
-
-    // Activity Compose
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
-
-    // Compose - Use the BOM to manage versions
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.preference.ktx)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-
-    // Testing
+    implementation(libs.androidx.material.icons)
+    implementation(libs.material)
+    implementation(libs.nanohttpd)
+    implementation(libs.androidx.documentfile)
+    implementation(libs.zxing.core)
+    implementation(libs.bouncy.castle.prov)
+    implementation(libs.bouncy.castle.pkix)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
-
-    // NanoHTTPD
-    implementation(libs.nanohttpd)
-
-    // Storage Access Framework / DocumentFile
-    implementation(libs.androidx.documentfile)
-
-    // JSON library for API responses
-    implementation(libs.orgjson)
-
-    implementation(libs.androidx.localbroadcastmanager)
-
-    implementation(libs.material)
-
-    // NEW: Bouncy Castle for certificate generation
-    implementation(libs.bouncy.castle.prov)
-    implementation(libs.bouncy.castle.pkix)
+    debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }
