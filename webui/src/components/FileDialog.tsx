@@ -1,14 +1,14 @@
 import {
+  CircleHelp,
   FolderPlus,
   LoaderCircle,
   Pencil,
-  ShieldCheck,
   Trash2,
   X
 } from 'lucide-react';
 import type { FormEvent, RefObject } from 'react';
 import type { DialogState } from '../types';
-import { ItemIcon, NoodleMark } from './Icons';
+import { ItemIcon } from './Icons';
 
 interface Props {
   modal: RefObject<HTMLDialogElement | null>;
@@ -56,7 +56,7 @@ export default function FileDialog({
               {dialog.kind === 'delete' ? (
                 <Trash2 size={25} />
               ) : dialog.kind === 'help' ? (
-                <NoodleMark />
+                <CircleHelp size={25} />
               ) : dialog.kind === 'folder' ? (
                 <FolderPlus size={25} />
               ) : (
@@ -75,12 +75,12 @@ export default function FileDialog({
           </div>
           <h2 id="dialog-title">
             {dialog.kind === 'folder'
-              ? 'A new home for your files'
+              ? 'New folder'
               : dialog.kind === 'rename'
-                ? 'Give it a new name'
+                ? 'Rename'
                 : dialog.kind === 'delete'
                   ? `Delete ${dialog.items?.length === 1 ? 'this item' : `${dialog.items?.length} items`}?`
-                  : 'A little closer, in three steps.'}
+                  : 'Help'}
           </h2>
           {dialog.kind === 'help' ? (
             <>
@@ -88,53 +88,46 @@ export default function FileDialog({
                 <li>
                   <span>1</span>
                   <div>
-                    <strong>Start on your phone</strong>
+                    <strong>Choose a folder</strong>
                     <p>Choose a folder in Noodle and tap Start sharing.</p>
                   </div>
                 </li>
                 <li>
                   <span>2</span>
                   <div>
-                    <strong>Join the same Wi-Fi</strong>
+                    <strong>Open the address</strong>
                     <p>
-                      Open the address shown on your phone in your other
-                      device’s browser.
+                      Connect to the same Wi-Fi network or hotspot. Open the
+                      address shown in Noodle in a browser.
                     </p>
                   </div>
                 </li>
                 <li>
                   <span>3</span>
                   <div>
-                    <strong>Make yourself at home</strong>
+                    <strong>Transfer files</strong>
                     <p>
-                      Click a file to download. Drop files here to upload. Stop
-                      sharing on your phone when done.
+                      Click a file to download. Use Upload files or drag and
+                      drop to upload.
                     </p>
                   </div>
                 </li>
               </ol>
-              <div className="help-note">
-                <ShieldCheck size={18} />
-                <p>
-                  Your files stay on your Android device. Folder changes here
-                  also change the files on your phone.
-                </p>
-              </div>
               <button
                 type="button"
                 className="button primary full-width"
                 onClick={() => setDialog(null)}
               >
-                Got it
+                Close
               </button>
             </>
           ) : (
             <>
               <p>
                 {dialog.kind === 'delete'
-                  ? 'This removes the selected items from your phone. Folders and their contents will be deleted. This cannot be undone.'
+                  ? 'Delete the selected files and folders, including folder contents. This cannot be undone.'
                   : dialog.kind === 'rename'
-                    ? `Rename “${dialog.items?.[0].name}” on your phone.`
+                    ? `Rename “${dialog.items?.[0].name}”.`
                     : `Create a folder inside “${currentName}”.`}
               </p>
               {dialog.kind === 'delete' ? (

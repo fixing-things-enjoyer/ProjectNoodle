@@ -6,7 +6,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -67,32 +66,10 @@ fun SharingScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                        ) {
-                            Icon(
-                                Icons.Outlined.AllInclusive,
-                                null,
-                                Modifier.padding(9.dp).size(23.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
-                        Text(
-                            "Noodle",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                },
+                title = { Text("Noodle") },
                 actions = {
                     IconButton(onClick = { showHelp = true }) {
-                        Icon(Icons.AutoMirrored.Outlined.HelpOutline, "How sharing works")
+                        Icon(Icons.AutoMirrored.Outlined.HelpOutline, "Help")
                     }
                 },
             )
@@ -142,13 +119,6 @@ fun SharingScreen(
                             style = MaterialTheme.typography.labelLarge,
                         )
                     }
-                    Text(
-                        if (state.running) "Sharing stays active while you use other apps."
-                        else "No account. No cloud. Just your devices.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 10.dp),
-                    )
                 }
             }
         },
@@ -161,23 +131,11 @@ fun SharingScreen(
                     .padding(horizontal = 24.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusPill(state)
-                    Text(
-                        if (state.running) "Your files,\nwithin reach."
-                        else "Less between you\nand your files.",
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        if (state.running)
-                            "Open the address below on a device connected to the same Wi-Fi."
-                        else
-                            "Share a folder with your other devices. All it takes is the same Wi-Fi and a browser.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Text(
+                    if (state.running) "Sharing active"
+                    else if (state.busy) "${state.status}…" else "Sharing stopped",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 state.error?.let { error ->
                     Card(
                         colors =
@@ -223,19 +181,11 @@ fun SharingScreen(
                                         Icon(Icons.Outlined.Devices, null)
                                         Column {
                                             Text(
-                                                "Allow this device?",
-                                                style = MaterialTheme.typography.titleSmall,
-                                            )
-                                            Text(
                                                 client,
                                                 style = MaterialTheme.typography.bodyMedium,
                                             )
                                         }
                                     }
-                                    Text(
-                                        "This device can access and change files in your shared folder.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
                                     Row(
                                         Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.End,
@@ -267,56 +217,39 @@ fun SharingScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(15.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                            ) {
-                                Icon(
-                                    Icons.Outlined.FolderOpen,
-                                    null,
-                                    Modifier.padding(14.dp).size(25.dp),
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                )
-                            }
+                            Icon(Icons.Outlined.FolderOpen, null, Modifier.size(24.dp))
                             Column(
                                 Modifier.weight(1f),
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 Text(
-                                    "SHARED FOLDER",
+                                    "Shared folder",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 Text(
                                     if (state.running)
                                         state.folderName ?: folderName ?: "Shared folder"
-                                    else folderName ?: "Choose what to share",
+                                    else folderName ?: "No folder selected",
                                     style = MaterialTheme.typography.titleMedium,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 if (folderName != null)
                                     Text(
-                                        if (folderWritable) "Files can be uploaded and downloaded"
-                                        else "Read only · downloads available",
+                                        if (folderWritable) "Read/write" else "Read only",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                             }
                         }
-                        if (editable)
+                        if (editable && folderName != null)
                             OutlinedButton(
                                 onClick = onChooseFolder,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Text(if (folderName == null) "Choose a folder" else "Change folder")
+                                Text("Change folder")
                             }
-                        else
-                            Text(
-                                "Stop sharing to change this folder.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                     }
                 }
                 if (state.running) {
@@ -337,7 +270,7 @@ fun SharingScreen(
                             ) {
                                 Icon(Icons.Outlined.Language, null, Modifier.size(20.dp))
                                 Text(
-                                    "OPEN ON YOUR OTHER DEVICE",
+                                    "Address",
                                     style = MaterialTheme.typography.labelSmall,
                                 )
                             }
@@ -384,41 +317,15 @@ fun SharingScreen(
                                 }
                             } else {
                                 Text(
-                                    "Connect to Wi-Fi",
+                                    "No network address",
                                     style = MaterialTheme.typography.titleLarge,
                                 )
                                 Text(
-                                    "Sharing is ready. Join a Wi-Fi network or enable your phone’s hotspot to get an address.",
+                                    "Connect to Wi-Fi or enable a hotspot.",
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
                             }
-                            if (https)
-                                Text(
-                                    "Your browser will show a certificate warning for this local HTTPS connection.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
                         }
-                    }
-                } else if (folderName == null) {
-                    Column(
-                        Modifier.padding(horizontal = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
-                    ) {
-                        Instruction(
-                            "1",
-                            "Choose a folder",
-                            "Only this folder and its contents will be shared.",
-                        )
-                        Instruction(
-                            "2",
-                            "Start sharing",
-                            "Noodle gives you an address for your other device.",
-                        )
-                        Instruction(
-                            "3",
-                            "Open it in a browser",
-                            "Upload, download and organize your files.",
-                        )
                     }
                 }
                 Card(
@@ -451,8 +358,8 @@ fun SharingScreen(
                             ) {
                                 SettingRow(
                                     Icons.Outlined.VerifiedUser,
-                                    "Approve devices",
-                                    "Allow each new device before it can access your files.",
+                                    "Require approval",
+                                    "Approve each device before access.",
                                     requireApproval,
                                     editable,
                                     onApprovalChange,
@@ -460,15 +367,15 @@ fun SharingScreen(
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 SettingRow(
                                     Icons.Outlined.Lock,
-                                    "Encrypted connection",
-                                    "Use HTTPS. Your browser will show a local certificate warning.",
+                                    "HTTPS",
+                                    "Uses a self-signed certificate.",
                                     https,
                                     editable,
                                     onHttpsChange,
                                 )
                                 if (!editable)
                                     Text(
-                                        "Stop sharing to change these options.",
+                                        "Stop sharing to change settings.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -476,50 +383,19 @@ fun SharingScreen(
                         }
                     }
                 }
-                Row(
-                    Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Shield,
-                        null,
-                        Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "Your files stay on your phone. Changes made in the browser also change the files in your shared folder.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
             }
         }
     }
     if (showHelp)
         AlertDialog(
             onDismissRequest = { showHelp = false },
-            icon = { Icon(Icons.Outlined.Devices, null) },
-            title = { Text("Sharing in three steps") },
+            title = { Text("Help") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                    Instruction(
-                        "1",
-                        "Choose a folder",
-                        "Pick the files you want to access from your other devices.",
-                    )
-                    Instruction(
-                        "2",
-                        "Start sharing",
-                        "Keep both devices on the same Wi-Fi or connect the other device to your phone’s hotspot.",
-                    )
-                    Instruction(
-                        "3",
-                        "Open the address",
-                        "Type the address into a browser or scan the QR code. Stop sharing when you’re done.",
-                    )
-                }
+                Text(
+                    "1. Choose a folder.\n2. Tap Start sharing.\n3. Open the address or scan the QR code on another device.\n\nBoth devices must use the same Wi-Fi network or hotspot."
+                )
             },
-            confirmButton = { TextButton(onClick = { showHelp = false }) { Text("Got it") } },
+            confirmButton = { TextButton(onClick = { showHelp = false }) { Text("Close") } },
         )
     if (showQr && state.address != null && state.running) {
         val qr =
@@ -544,7 +420,7 @@ fun SharingScreen(
             }
         AlertDialog(
             onDismissRequest = { showQr = false },
-            title = { Text("Scan to open your files") },
+            title = { Text("QR code") },
             text = {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -555,66 +431,13 @@ fun SharingScreen(
                         "QR code for ${state.address}",
                         Modifier.size(240.dp).background(Color.White),
                     )
-                    Text(
-                        "Use the camera on another device connected to the same Wi-Fi.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
                     SelectionContainer {
                         Text(state.address, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showQr = false }) { Text("Done") } },
+            confirmButton = { TextButton(onClick = { showQr = false }) { Text("Close") } },
         )
-    }
-}
-
-@Composable
-private fun StatusPill(state: SharingState) {
-    Surface(
-        shape = CircleShape,
-        color =
-            if (state.running) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Box(
-                Modifier.size(6.dp)
-                    .background(
-                        if (state.running) MaterialTheme.colorScheme.secondary
-                        else MaterialTheme.colorScheme.outline,
-                        CircleShape,
-                    )
-            )
-            Text(
-                if (state.running) "Sharing is on"
-                else if (state.busy) "${state.status}…" else "Ready when you are",
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-    }
-}
-
-@Composable
-private fun Instruction(number: String, title: String, description: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
-            Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                Text(number, style = MaterialTheme.typography.labelMedium)
-            }
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(
-                description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 

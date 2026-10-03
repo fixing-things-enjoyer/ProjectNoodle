@@ -77,7 +77,7 @@ test.beforeEach(async ({ page }, testInfo) => {
     await route.fulfill({ status, json: body });
   });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Downloads.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Downloads' })).toBeVisible();
   await expect(
     page.getByRole('link', { name: /^weekend plans.txt/ })
   ).toBeVisible();
@@ -92,7 +92,7 @@ test('browse folders and browser history; encode literal filenames', async ({
   await page
     .getByRole('button', { name: 'Camera Folder', exact: true })
     .click();
-  await expect(page.getByRole('heading', { name: 'Camera.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Camera' })).toBeVisible();
   await expect(page.getByRole('link', { name: /^Sunset.jpg/ })).toBeVisible();
   await page.goBack();
   await expect(
@@ -194,9 +194,9 @@ test('uploads finish and appear in transfers', async ({ page }, testInfo) => {
       .getByRole('button', { name: /^Transfers/ })
       .first()
       .click();
-  await expect(page.getByRole('heading', { name: 'Transfers.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Transfers' })).toBeVisible();
   await expect(page.locator('.transfer-row')).toContainText('hello.txt');
-  await expect(page.locator('.transfer-row')).toContainText('On your phone');
+  await expect(page.locator('.transfer-row')).toContainText('Uploaded');
 });
 
 test('approval automatically retries and connects', async ({ page }) => {
@@ -217,10 +217,10 @@ test('approval automatically retries and connects', async ({ page }) => {
   );
   await page.getByRole('button', { name: 'Refresh folder' }).click();
   await expect(
-    page.getByRole('heading', { name: 'One quick approval' })
+    page.getByRole('heading', { name: 'Approval required' })
   ).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Room for something new' })
+    page.getByRole('heading', { name: 'Folder is empty' })
   ).toBeVisible({ timeout: 8000 });
 });
 
@@ -236,7 +236,7 @@ test('read-only folders disable mutation controls', async ({ page }) => {
     })
   );
   await page.getByRole('button', { name: 'Refresh folder' }).click();
-  await expect(page.getByText('This folder is read only')).toBeVisible();
+  await expect(page.getByText('Read only')).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'New folder', exact: true })
   ).toBeDisabled();
@@ -254,7 +254,7 @@ test('network error has retry and never shows stale files', async ({
   await page.route('**/api/list?*', (route) => route.abort('failed'));
   await page.getByRole('button', { name: 'Refresh folder' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Couldn’t open this folder' })
+    page.getByRole('heading', { name: 'Unable to open folder' })
   ).toBeVisible();
   await expect(
     page.getByRole('link', { name: /^weekend plans.txt/ })
@@ -367,7 +367,7 @@ test('queued uploads cancel immediately and never send', async ({
   release();
   await expect(
     page.locator('.transfer-row').filter({ hasText: 'first.txt' })
-  ).toContainText('On your phone');
+  ).toContainText('Uploaded');
   expect(sent).toBe(1);
 });
 
@@ -377,9 +377,7 @@ test('background connection check detects stopped sharing', async ({
   await page.route('**/api/list?*', (route) => route.abort('failed'));
   await page.clock.fastForward(21_000);
   await expect(
-    page.getByRole('heading', { name: 'Couldn’t open this folder' })
+    page.getByRole('heading', { name: 'Unable to open folder' })
   ).toBeVisible();
-  await expect(
-    page.getByText('Keep Noodle running', { exact: false })
-  ).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Connection failed.');
 });

@@ -283,9 +283,7 @@ class WebServerService : Service(), ConnectionApprovalListener {
                 if (state.running) "Sharing ${state.folderName ?: "your folder"}"
                 else "Starting file sharing…"
             )
-            .setContentText(
-                state.address ?: "Connect to Wi-Fi to open your files on another device."
-            )
+            .setContentText(state.address ?: "No network address.")
             .setContentIntent(open)
             .setOngoing(true)
             .setSilent(true)
@@ -315,8 +313,8 @@ class WebServerService : Service(), ConnectionApprovalListener {
             val notification =
                 NotificationCompat.Builder(this, APPROVAL_CHANNEL)
                     .setSmallIcon(R.drawable.ic_share_notification)
-                    .setContentTitle("Allow this device?")
-                    .setContentText("$clientIp wants to access your shared folder.")
+                    .setContentTitle("Connection request")
+                    .setContentText(clientIp)
                     .setContentIntent(open)
                     .setAutoCancel(true)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)

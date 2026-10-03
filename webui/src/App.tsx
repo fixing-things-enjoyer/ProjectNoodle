@@ -3,7 +3,6 @@ import {
   ArrowDown,
   ArrowDownToLine,
   ArrowLeft,
-  ArrowUpRight,
   Check,
   CheckCheck,
   ChevronRight,
@@ -18,7 +17,6 @@ import {
   Moon,
   RefreshCw,
   Search,
-  ShieldCheck,
   Smartphone,
   Sun,
   Trash2,
@@ -421,11 +419,8 @@ export default function App() {
           <span className="brand-mark">
             <NoodleMark />
           </span>
-          <span>
-            Noodle<span className="brand-caption">A little closer.</span>
-          </span>
+          <span>Noodle</span>
         </a>
-        <div className="sidebar-label">WORKSPACE</div>
         <nav aria-label="Workspace">
           <button
             className={`nav-item ${section === 'files' ? 'active' : ''}`}
@@ -444,37 +439,13 @@ export default function App() {
             )}
           </button>
         </nav>
-        <div className="device-card">
-          <span className="device-icon">
-            <Smartphone size={22} />
-          </span>
-          <div>
-            <strong>Android device</strong>
-            <span>
-              {listing
-                ? 'Connected on your Wi-Fi'
-                : loadError
-                  ? 'Connection unavailable'
-                  : 'Connecting…'}
-            </span>
-          </div>
-          <span className={`status-dot ${listing ? '' : 'offline'}`} />
-        </div>
         <div className="sidebar-bottom">
-          <div className="local-note">
-            <ShieldCheck size={18} />
-            <div>
-              <strong>Just your devices.</strong>
-              <p>Files stay on your phone. No cloud, no account.</p>
-            </div>
-          </div>
           <button
             className="help-button"
             onClick={() => openDialog({ kind: 'help' })}
           >
-            <CircleHelp size={18} /> How Noodle works <ArrowUpRight size={15} />
+            <CircleHelp size={18} /> Help
           </button>
-          <span className="sidebar-footnote">PROJECT NOODLE</span>
         </div>
       </aside>
       <div className="workspace">
@@ -524,16 +495,12 @@ export default function App() {
         <main id="main-content" tabIndex={-1}>
           <div className="page-heading">
             <div>
-              <div className="eyebrow">YOUR PHONE. YOUR FILES.</div>
-              <h1>
-                {section === 'files' ? currentName : 'Transfers'}
-                <span className="heading-dot">.</span>
-              </h1>
-              <p>
-                {section === 'files'
-                  ? 'A simple space to move things between your devices.'
-                  : 'Follow your uploads, from here to your phone.'}
-              </p>
+              <h1>{section === 'files' ? currentName : 'Transfers'}</h1>
+              {section === 'files' && listing && (
+                <span className="folder-access">
+                  {listing.canWrite ? 'Read/write' : 'Read only'}
+                </span>
+              )}
             </div>
             <div className="heading-actions">
               {section === 'files' && (
@@ -567,23 +534,6 @@ export default function App() {
           />
           {section === 'files' ? (
             <>
-              <div className="folder-summary">
-                <span className="summary-icon">
-                  <FolderOpen size={24} strokeWidth={1.6} />
-                </span>
-                <div>
-                  <strong>{rootName}</strong>
-                  <span>Shared from your Android device</span>
-                </div>
-                <span className="folder-access">
-                  <ShieldCheck size={14} />
-                  {listing?.canWrite
-                    ? 'Read & write'
-                    : listing
-                      ? 'Read only'
-                      : 'Local sharing'}
-                </span>
-              </div>
               <div className="files-panel">
                 <div className="file-toolbar">
                   <label className="search-box">
@@ -724,8 +674,7 @@ export default function App() {
                 {loading ? (
                   <div className="empty-state" role="status">
                     <LoaderCircle className="spin" size={28} />
-                    <h2>Opening your folder…</h2>
-                    <p>Getting the latest files from your phone.</p>
+                    <h2>Loading files…</h2>
                   </div>
                 ) : loadError ? (
                   <div className="empty-state" role="alert">
@@ -739,17 +688,17 @@ export default function App() {
                     </span>
                     <h2>
                       {loadError instanceof ApiError && loadError.status === 401
-                        ? 'One quick approval'
-                        : 'Couldn’t open this folder'}
+                        ? 'Approval required'
+                        : 'Unable to open folder'}
                     </h2>
                     <p>
                       {loadError instanceof ApiError && loadError.status === 401
-                        ? 'Open Noodle on your phone and approve this device. We’ll connect automatically.'
+                        ? 'Approve this device in the Android app.'
                         : errorMessage(loadError)}
                     </p>
                     <div className="empty-actions">
                       <button className="button secondary" onClick={refresh}>
-                        <RefreshCw size={16} /> Try again
+                        <RefreshCw size={16} /> Retry
                       </button>
                       {path !== '/' && (
                         <button
@@ -769,14 +718,9 @@ export default function App() {
                     <h2>
                       {query || category !== 'all'
                         ? 'No matching files'
-                        : 'Room for something new'}
+                        : 'Folder is empty'}
                     </h2>
-                    <p>
-                      {query || category !== 'all'
-                        ? 'Try another search or file type.'
-                        : 'Drop files here, or choose Upload files to send them to your phone.'}
-                    </p>
-                    {query || category !== 'all' ? (
+                    {(query || category !== 'all') && (
                       <button
                         className="button secondary"
                         onClick={() => {
@@ -785,14 +729,6 @@ export default function App() {
                         }}
                       >
                         Clear filters
-                      </button>
-                    ) : (
-                      <button
-                        className="button primary"
-                        disabled={!canWrite}
-                        onClick={() => fileInput.current?.click()}
-                      >
-                        <Upload size={17} /> Upload files
                       </button>
                     )}
                   </div>
@@ -808,31 +744,18 @@ export default function App() {
                     openDialog={openDialog}
                   />
                 )}
-                <div className="panel-footer">
-                  <span>
-                    {path !== '/' ? (
-                      <button
-                        className="text-button"
-                        onClick={() =>
-                          navigate('/' + crumbs.slice(0, -1).join('/'))
-                        }
-                      >
-                        <ArrowLeft size={14} /> Parent folder
-                      </button>
-                    ) : (
-                      <>
-                        <ShieldCheck size={14} /> Files stay on your device
-                      </>
-                    )}
-                  </span>
-                  <span>
-                    {canWrite
-                      ? 'Drag & drop to upload'
-                      : listing
-                        ? 'This folder is read only'
-                        : 'Same Wi-Fi. Simple sharing.'}
-                  </span>
-                </div>
+                {path !== '/' && (
+                  <div className="panel-navigation">
+                    <button
+                      className="text-button"
+                      onClick={() =>
+                        navigate('/' + crumbs.slice(0, -1).join('/'))
+                      }
+                    >
+                      <ArrowLeft size={14} /> Parent folder
+                    </button>
+                  </div>
+                )}
               </div>
               {activeTransfers.length > 0 && (
                 <button
@@ -841,9 +764,8 @@ export default function App() {
                 >
                   <LoaderCircle className="spin" size={18} />
                   <span>
-                    Sending {activeTransfers.length}{' '}
-                    {activeTransfers.length === 1 ? 'file' : 'files'} to your
-                    phone
+                    Uploading {activeTransfers.length}{' '}
+                    {activeTransfers.length === 1 ? 'file' : 'files'}
                   </span>
                   <span>
                     View transfers <ChevronRight size={16} />
@@ -893,13 +815,13 @@ export default function App() {
                         <span>
                           {formatSize(transfer.file.size)} ·{' '}
                           {transfer.state === 'done'
-                            ? 'On your phone'
+                            ? 'Uploaded'
                             : transfer.state === 'uploading'
                               ? transfer.progress === 100
-                                ? 'Saving on your phone…'
+                                ? 'Saving…'
                                 : `${transfer.progress}% uploaded`
                               : transfer.state === 'queued'
-                                ? 'Waiting to upload'
+                                ? 'Queued'
                                 : transfer.state === 'canceled'
                                   ? 'Canceled'
                                   : transfer.error}
@@ -954,28 +876,11 @@ export default function App() {
                   <span className="empty-icon">
                     <ArrowDownToLine size={30} />
                   </span>
-                  <h2>Nothing in transit</h2>
-                  <p>
-                    Your uploads will appear here. Choose a few files to get
-                    started.
-                  </p>
-                  <button
-                    className="button primary"
-                    disabled={!canWrite}
-                    onClick={() => fileInput.current?.click()}
-                  >
-                    <Upload size={17} /> Upload files
-                  </button>
+                  <h2>No uploads</h2>
                 </div>
               )}
             </div>
           )}
-          <footer className="workspace-footer">
-            <span>Less between you and your files.</span>
-            <button onClick={() => openDialog({ kind: 'help' })}>
-              <CircleHelp size={14} /> Need a hand?
-            </button>
-          </footer>
         </main>
         <nav className="mobile-nav" aria-label="Workspace">
           <button
@@ -1002,7 +907,7 @@ export default function App() {
         <div className="drop-overlay">
           <div>
             <Upload size={44} />
-            <h2>Drop it like it’s local.</h2>
+            <h2>Drop files to upload</h2>
             <p>Upload to {currentName}</p>
           </div>
         </div>

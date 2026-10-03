@@ -1,6 +1,6 @@
-# One repository, one APK
+# Repository architecture
 
-`app/` contains the Android app, sharing service and HTTP/HTTPS server. `webui/` contains the React client, its locked dependencies and browser tests. The browser connects directly to the Android server; no separate web deployment or cloud service is required.
+`app/` contains the Android app, sharing service and HTTP/HTTPS server. `webui/` contains the React client, its locked dependencies and browser tests. The browser connects directly to the Android server.
 
 Android Gradle runs `installWebUi` → `buildWebUi` → `preBuild`. Vite builds `webui/dist/`, which is included as an Android asset source directory. Generated files are ignored by Git. Editing React source and running `./gradlew assembleDebug` produces an APK containing that exact UI. A clean checkout requires Node and Java, not a sibling repository or manually copied bundle.
 
@@ -42,4 +42,4 @@ Mutation parameters use URL-encoded forms. API failures return JSON with a reada
 
 Browser tests run desktop and phone layouts with a mock API, exercise browsing, search, filters, mutations, uploads, read-only/error/approval states, and check accessibility in both themes. Device tests use a test-only SAF provider with private sandbox files to exercise the real NanoHTTPD server, multipart uploads, filenames, access control, HTTPS and bundled assets. Compose tests cover the first-run, start, stop and connection-request flows. The test provider is never included in production APKs.
 
-The built APK was also checked through Android's real folder picker and storage provider: select a writable folder, start sharing, connect the bundled React app from a desktop browser, upload, download, create a folder, rename and delete. Download bytes and literal `+`/`%` filenames matched. The running Android and hosted browser captures are in `docs/screenshots/`.
+The built APK was also checked through Android's real folder picker and storage provider: select a writable folder, start sharing, connect the bundled React app from a desktop browser, upload, download, create a folder, rename and delete. Download bytes and literal `+`/`%` filenames matched.

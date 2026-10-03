@@ -38,8 +38,7 @@ class MainActivity : ComponentActivity() {
         }
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (!granted)
-                notice = "Sharing can still run. Open Noodle to approve connection requests."
+            if (!granted) notice = "Notifications disabled."
             startSharing()
         }
 
@@ -154,8 +153,6 @@ class MainActivity : ComponentActivity() {
                         )
                     }
             }
-            if (!folderWritable)
-                notice = "This folder is read only. Other devices can download its files."
         } catch (error: Exception) {
             notice = error.message ?: "Could not open this folder. Choose another folder."
         }

@@ -24,7 +24,7 @@ export class ApiError extends Error {
 }
 
 const connectionMessage =
-  'Couldn’t reach your phone. Keep Noodle running and both devices on the same Wi-Fi.';
+  'Connection failed. Start sharing in Noodle and connect both devices to the same Wi-Fi network.';
 
 async function requestJson<T>(
   url: string,
@@ -47,10 +47,7 @@ async function requestJson<T>(
     );
   }
   if (!response.ok)
-    throw new ApiError(
-      response.status,
-      body.message || 'Could not finish this request.'
-    );
+    throw new ApiError(response.status, body.message || 'Request failed.');
   return body as T;
 }
 
@@ -109,7 +106,7 @@ export function uploadFile(
     };
     request.onerror = () => {
       finish();
-      reject(new Error('Connection lost. Keep Noodle running on your phone.'));
+      reject(new Error('Connection lost. Check the Android sharing session.'));
     };
     request.onabort = () => {
       finish();

@@ -43,7 +43,7 @@ class SharingScreenTest {
     @Test
     fun firstRunHasClearFolderAction() {
         show(SharingState(), null)
-        compose.onAllNodesWithText("Choose a folder").onLast().performClick()
+        compose.onNodeWithText("Choose a folder").performClick()
         assertTrue(chosen)
     }
 
@@ -72,7 +72,7 @@ class SharingScreenTest {
     @Test
     fun pendingClientIsVisibleInApp() {
         show(SharingState(status = "Running", pendingClients = listOf("192.168.1.20")), "Downloads")
-        compose.onNodeWithText("Allow this device?").assertIsDisplayed()
+        compose.onNodeWithText("192.168.1.20").assertIsDisplayed()
         compose.onNodeWithText("Allow").assertIsDisplayed()
     }
 }
